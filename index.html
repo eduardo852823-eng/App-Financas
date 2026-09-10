@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>FinanHub</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ===================== LOGIN ===================== -->
+  <section class="screen screen-login active" id="screen-login">
+    <div class="login-wrap">
+      <div class="login-logo">
+        <div class="logo-badge">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 18V10" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M10 18V6" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M16 18V13" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M20 18V9" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>
+        </div>
+        <h1>Finan<span>Hub</span></h1>
+        <p>Todas as suas finanças<br>em um só lugar.</p>
+      </div>
+
+      <div class="login-actions">
+        <div id="google-btn-container" class="google-btn-container"></div>
+        <button class="btn btn-outline" id="btn-email-login">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          Entrar com e-mail
+        </button>
+        <a href="#" class="link-create-account" id="link-create-account">Criar conta</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== EMAIL LOGIN FORM (modal) ===================== -->
+  <div class="modal-overlay" id="modal-email">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Entrar com e-mail</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Nome</label>
+        <input type="text" id="input-name" placeholder="Seu nome" value="Dudu">
+        <label>E-mail</label>
+        <input type="email" id="input-email" placeholder="voce@email.com" value="dudu@email.com">
+        <button class="btn btn-primary" id="btn-do-email-login">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN APP ===================== -->
+  <div class="main-app" id="main-app">
+
+    <!-- ---------- TOPBAR ---------- -->
+    <header class="topbar" id="topbar">
+      <button class="icon-btn back-btn hidden" id="btn-back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="topbar-title" id="topbar-title">Início</div>
+      <button class="icon-btn avatar-btn" id="btn-profile">
+        <img id="avatar-img" class="avatar-img hidden" alt="">
+        <svg id="avatar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+    </header>
+
+    <main class="content" id="content">
+
+      <!-- ---------- DASHBOARD ---------- -->
+      <section class="screen screen-dashboard active" data-screen="inicio">
+        <p class="greeting" id="greeting-text">Olá, Dudu!</p>
+        <p class="subtext">Aqui está um resumo das suas finanças.</p>
+
+        <div class="card card-balance">
+          <div class="card-balance-top">
+            <span class="card-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Saldo total</span>
+          </div>
+          <div class="card-balance-value" id="balance-total">R$ 0,00</div>
+          <div class="card-balance-sub" id="balance-change">—</div>
+        </div>
+
+        <div class="row-cards">
+          <div class="card card-mini card-green">
+            <span class="mini-label">↑ Entradas</span>
+            <span class="mini-value" id="total-entradas">R$ 0,00</span>
+          </div>
+          <div class="card card-mini card-red">
+            <span class="mini-label">↓ Saídas</span>
+            <span class="mini-value" id="total-saidas">R$ 0,00</span>
+          </div>
+        </div>
+
+        <div class="filters-row">
+          <select id="filter-periodo"></select>
+          <select id="filter-banco"></select>
+        </div>
+
+        <div class="section-head">
+          <h3>Seus bancos</h3>
+          <a href="#" class="link-small" data-nav="bancos">Ver todos ›</a>
+        </div>
+        <div class="banks-scroll" id="banks-scroll"></div>
+
+        <div class="section-head">
+          <h3>Gastos por categoria</h3>
+        </div>
+        <div class="card">
+          <canvas id="donut-chart" width="240" height="240"></canvas>
+          <div class="donut-legend" id="donut-legend"></div>
+        </div>
+
+        <button class="btn btn-outline btn-demo" id="btn-demo-data">Usar dados de demonstração</button>
+      </section>
+
+      <!-- ---------- BANCOS ---------- -->
+      <section class="screen screen-bancos" data-screen="bancos">
+        <p class="subtext">Conecte seus bancos e acompanhe tudo em um só lugar.</p>
+        <div class="banks-list" id="banks-list"></div>
+        <button class="btn btn-primary btn-add-inst" id="btn-add-inst">+ Adicionar instituição</button>
+      </section>
+
+      <!-- ---------- TRANSAÇÕES ---------- -->
+      <section class="screen screen-transacoes" data-screen="transacoes">
+        <div class="search-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="search-transacoes" placeholder="Buscar transações...">
+        </div>
+        <div class="filters-row">
+          <select id="tx-filter-banco"><option value="all">Todos os bancos</option></select>
+          <select id="tx-filter-tipo">
+            <option value="all">Todos os tipos</option>
+            <option value="entrada">Entradas</option>
+            <option value="saida">Saídas</option>
+          </select>
+        </div>
+        <div id="tx-list-container"></div>
+      </section>
+
+      <!-- ---------- CATEGORIAS ---------- -->
+      <section class="screen screen-categorias" data-screen="categorias">
+        <div class="segmented" id="cat-segmented">
+          <button class="seg-btn active" data-seg="gastos">Gastos</button>
+          <button class="seg-btn" data-seg="ganhos">Ganhos</button>
+        </div>
+        <div id="categorias-list"></div>
+      </section>
+
+      <!-- ---------- RELATÓRIOS ---------- -->
+      <section class="screen screen-relatorios" data-screen="relatorios">
+        <div class="segmented" id="rel-segmented">
+          <button class="seg-btn active" data-seg="geral">Geral</button>
+          <button class="seg-btn" data-seg="comparar">Comparar</button>
+        </div>
+
+        <div id="rel-geral">
+          <div class="filters-grid">
+            <div>
+              <label class="mini-lbl">Ano</label>
+              <select id="rel-ano"></select>
+            </div>
+            <div>
+              <label class="mini-lbl">Mês</label>
+              <select id="rel-mes"></select>
+            </div>
+            <div>
+              <label class="mini-lbl">Banco</label>
+              <select id="rel-banco"><option value="all">Todos</option></select>
+            </div>
+            <div>
+              <label class="mini-lbl">Categoria</label>
+              <select id="rel-categoria"><option value="all">Todas</option></select>
+            </div>
+          </div>
+
+          <div class="row-cards">
+            <div class="card card-mini card-green">
+              <span class="mini-label">↑ Entradas</span>
+              <span class="mini-value" id="rel-entradas">R$ 0,00</span>
+            </div>
+            <div class="card card-mini card-red">
+              <span class="mini-label">↓ Saídas</span>
+              <span class="mini-value" id="rel-saidas">R$ 0,00</span>
+            </div>
+          </div>
+          <div class="card card-result">
+            <span class="mini-label">Resultado</span>
+            <span class="mini-value" id="rel-resultado">R$ 0,00</span>
+          </div>
+
+          <div class="section-head"><h3>Entradas vs Saídas</h3></div>
+          <div class="card">
+            <canvas id="bar-chart" width="320" height="180"></canvas>
+          </div>
+
+          <div class="section-head"><h3>Por banco</h3></div>
+          <div class="card" id="rel-por-banco"></div>
+        </div>
+
+        <div id="rel-comparar" class="hidden">
+          <label class="mini-lbl">Selecione os meses</label>
+          <select id="comp-mes1"></select>
+          <div class="vs-label">VS</div>
+          <select id="comp-mes2"></select>
+          <label class="mini-lbl" style="margin-top:14px">Tipo</label>
+          <select id="comp-tipo">
+            <option value="saida">Gastos</option>
+            <option value="entrada">Entradas</option>
+          </select>
+          <button class="btn btn-primary" id="btn-comparar" style="margin-top:14px">Gerar comparação</button>
+          <div class="card hidden" id="comp-resultado"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ---------- BOTTOM NAV ---------- -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="nav-btn active" data-nav="inicio">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        <span>Início</span>
+      </button>
+      <button class="nav-btn" data-nav="transacoes">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/></svg>
+        <span>Transações</span>
+      </button>
+      <button class="nav-btn" data-nav="categorias">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+        <span>Categorias</span>
+      </button>
+      <button class="nav-btn" data-nav="relatorios">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
+        <span>Relatórios</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ===================== TRANSAÇÃO DETALHE (modal) ===================== -->
+  <div class="modal-overlay" id="modal-detalhe">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Detalhe da transação</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body" id="detalhe-body"></div>
+    </div>
+  </div>
+
+  <!-- ===================== ALTERAR CATEGORIA (modal) ===================== -->
+  <div class="modal-overlay" id="modal-categoria">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Alterar categoria</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="cat-grid" id="cat-grid"></div>
+        <button class="btn btn-primary" id="btn-salvar-categoria">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ADICIONAR INSTITUIÇÃO (modal) ===================== -->
+  <div class="modal-overlay" id="modal-add-inst">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Adicionar instituição</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="subtext" style="margin-bottom:12px">Conexão simulada. Nenhuma senha bancária é solicitada — no futuro, essa integração usará o Open Finance oficial.</p>
+        <div id="add-inst-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PERFIL (modal) ===================== -->
+  <div class="modal-overlay" id="modal-perfil">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Perfil</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-row">
+          <img id="perfil-avatar" class="avatar-img-lg hidden" alt="">
+          <div id="perfil-avatar-icon" class="avatar-icon-lg">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+          </div>
+          <div>
+            <div class="profile-name" id="perfil-nome">Dudu Silva</div>
+            <div class="profile-email" id="perfil-email">dudu@email.com</div>
+          </div>
+        </div>
+        <button class="btn btn-outline" id="btn-logout" style="margin-top:20px">Sair</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
