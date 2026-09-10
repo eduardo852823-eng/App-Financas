@@ -11,7 +11,8 @@ const LS_KEYS = {
   user: "fh_user",
   institutions: "fh_institutions",
   transactions: "fh_transactions",
-  categoryOverrides: "fh_category_overrides"
+  categoryOverrides: "fh_category_overrides",
+  theme: "fh_theme"
 };
 
 const ALL_INSTITUTIONS = [
@@ -165,6 +166,33 @@ const TX_PAGE_SIZE = 10;
 let txVisibleCount = TX_PAGE_SIZE;
 
 /* ============================================================
+   TEMA (claro/escuro)
+   ============================================================ */
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const sun = document.getElementById("theme-icon-sun");
+  const moon = document.getElementById("theme-icon-moon");
+  if (sun && moon) {
+    sun.classList.toggle("hidden", theme === "dark");
+    moon.classList.toggle("hidden", theme !== "dark");
+  }
+}
+function getStoredTheme() {
+  return localStorage.getItem(LS_KEYS.theme);
+}
+function initTheme() {
+  const stored = getStoredTheme();
+  const theme = stored || "light"; // sem escolha prévia, começa no claro
+  applyTheme(theme);
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const next = current === "dark" ? "light" : "dark";
+  applyTheme(next);
+  localStorage.setItem(LS_KEYS.theme, next);
+}
+
+/* ============================================================
    NAVIGATION
    ============================================================ */
 function showLogin() {
@@ -181,7 +209,12 @@ function navigateTo(screen) {
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
-  if (target) target.classList.add("active");
+  if (target) {
+    // força o navegador a reiniciar a animação de entrada mesmo
+    // quando o usuário volta para uma tela já visitada antes
+    void target.offsetWidth;
+    target.classList.add("active");
+  }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === screen));
   const titles = { inicio: "Início", bancos: "Minhas instituições", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios" };
   document.getElementById("topbar-title").textContent = titles[screen] || "";
@@ -710,6 +743,10 @@ function wire(fn, label) {
   try { fn(); } catch (err) { console.error(`FinanHub: falha ao configurar "${label}"`, err); }
 }
 
+// Aplica o tema salvo imediatamente (antes do DOMContentLoaded) para
+// evitar um "flash" da tela clara ao recarregar em modo escuro.
+initTheme();
+
 document.addEventListener("DOMContentLoaded", () => {
   // Cada bloco roda isolado: se um botão/elemento falhar ao ser
   // configurado, os outros continuam funcionando normalmente.
@@ -729,6 +766,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
     document.getElementById("btn-logout").addEventListener("click", logoutUser);
   }, "perfil");
+
+  wire(() => {
+    document.getElementById("btn-theme-toggle").addEventListener("click", toggleTheme);
+  }, "tema");
 
   wire(() => {
     document.getElementById("bottom-nav").addEventListener("click", (e) => {
