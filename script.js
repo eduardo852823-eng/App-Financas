@@ -161,7 +161,7 @@ let catSegment = "gastos";
 let relSegment = "geral";
 let pendingCatTxId = null;
 let pendingCatSelected = null;
-const TX_PAGE_SIZE = 20;
+const TX_PAGE_SIZE = 10;
 let txVisibleCount = TX_PAGE_SIZE;
 
 /* ============================================================
