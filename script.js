@@ -161,6 +161,8 @@ let catSegment = "gastos";
 let relSegment = "geral";
 let pendingCatTxId = null;
 let pendingCatSelected = null;
+const TX_PAGE_SIZE = 20;
+let txVisibleCount = TX_PAGE_SIZE;
 
 /* ============================================================
    NAVIGATION
@@ -175,6 +177,7 @@ function showApp() {
   navigateTo("inicio");
 }
 function navigateTo(screen) {
+  if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
@@ -390,22 +393,29 @@ function populateTxFilters() {
 
 function renderTransacoes() {
   populateTxFilters();
-  const txs = filterTx(store.getTransactions(), { banco: txFilterBanco, tipo: txFilterTipo, search: txSearch });
+  const allTxs = filterTx(store.getTransactions(), { banco: txFilterBanco, tipo: txFilterTipo, search: txSearch })
+    .sort((a,b) => b.date.localeCompare(a.date));
   const container = document.getElementById("tx-list-container");
-  if (!txs.length) {
+  if (!allTxs.length) {
     container.innerHTML = `<div class="empty-state">Nenhuma transação encontrada.</div>`;
     return;
   }
+  const txs = allTxs.slice(0, txVisibleCount);
   const groups = {};
   txs.forEach(t => {
     const key = t.date.slice(0,7);
     (groups[key] = groups[key] || []).push(t);
   });
   const months = Object.keys(groups).sort().reverse();
-  container.innerHTML = months.map(m => {
-    const rows = groups[m].sort((a,b) => b.date.localeCompare(a.date)).map(t => txRowHtml(t)).join("");
+  let html = months.map(m => {
+    const rows = groups[m].map(t => txRowHtml(t)).join("");
     return `<div class="tx-month-label">${monthLabel(m)}</div>${rows}`;
   }).join("");
+  html += `<div class="tx-count-label">Mostrando ${txs.length} de ${allTxs.length} transações</div>`;
+  if (allTxs.length > txVisibleCount) {
+    html += `<button class="btn btn-outline" id="btn-load-more-tx">Carregar mais</button>`;
+  }
+  container.innerHTML = html;
 }
 
 function txRowHtml(t) {
@@ -696,112 +706,136 @@ function initGoogleLogin() {
 /* ============================================================
    EVENT WIRING
    ============================================================ */
+function wire(fn, label) {
+  try { fn(); } catch (err) { console.error(`FinanHub: falha ao configurar "${label}"`, err); }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-  initGoogleLogin();
+  // Cada bloco roda isolado: se um botão/elemento falhar ao ser
+  // configurado, os outros continuam funcionando normalmente.
 
-  // login screen
-  document.getElementById("btn-email-login").addEventListener("click", () => openModal("modal-email"));
-  document.getElementById("link-create-account").addEventListener("click", (e) => { e.preventDefault(); openModal("modal-email"); });
-  document.getElementById("btn-do-email-login").addEventListener("click", () => {
-    const name = document.getElementById("input-name").value.trim() || "Usuário";
-    const email = document.getElementById("input-email").value.trim() || "usuario@email.com";
-    closeAllModals();
-    loginUser({ name, email, picture: "" });
-  });
+  wire(() => {
+    document.getElementById("btn-email-login").addEventListener("click", () => openModal("modal-email"));
+    document.getElementById("link-create-account").addEventListener("click", (e) => { e.preventDefault(); openModal("modal-email"); });
+    document.getElementById("btn-do-email-login").addEventListener("click", () => {
+      const name = document.getElementById("input-name").value.trim() || "Usuário";
+      const email = document.getElementById("input-email").value.trim() || "usuario@email.com";
+      closeAllModals();
+      loginUser({ name, email, picture: "" });
+    });
+  }, "login por e-mail");
 
-  // profile
-  document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
-  document.getElementById("btn-logout").addEventListener("click", logoutUser);
+  wire(() => {
+    document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
+    document.getElementById("btn-logout").addEventListener("click", logoutUser);
+  }, "perfil");
 
-  // bottom nav
-  document.getElementById("bottom-nav").addEventListener("click", (e) => {
-    const btn = e.target.closest(".nav-btn");
-    if (btn) navigateTo(btn.dataset.nav);
-  });
-  document.getElementById("content").addEventListener("click", (e) => {
-    const navLink = e.target.closest("[data-nav]");
-    if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.nav); }
-  });
+  wire(() => {
+    document.getElementById("bottom-nav").addEventListener("click", (e) => {
+      const btn = e.target.closest(".nav-btn");
+      if (btn) navigateTo(btn.dataset.nav);
+    });
+    document.getElementById("content").addEventListener("click", (e) => {
+      const navLink = e.target.closest("[data-nav]");
+      if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.nav); }
+    });
+  }, "navegação inferior");
 
-  // close modals
-  document.querySelectorAll("[data-close-modal]").forEach(btn => btn.addEventListener("click", closeAllModals));
-  document.querySelectorAll(".modal-overlay").forEach(overlay => {
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeAllModals(); });
-  });
+  wire(() => {
+    document.querySelectorAll("[data-close-modal]").forEach(btn => btn.addEventListener("click", closeAllModals));
+    document.querySelectorAll(".modal-overlay").forEach(overlay => {
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) closeAllModals(); });
+    });
+  }, "fechar modais");
 
-  // dashboard filters + demo data
-  document.getElementById("filter-periodo").addEventListener("change", (e) => { dashFilterPeriodo = e.target.value; renderDashboard(); });
-  document.getElementById("filter-banco").addEventListener("change", (e) => { dashFilterBanco = e.target.value; renderDashboard(); });
-  document.getElementById("btn-demo-data").addEventListener("click", () => {
-    generateDemoData();
-    dashFilterPeriodo = "all"; dashFilterBanco = "all";
-    renderScreen(currentScreen);
-  });
+  wire(() => {
+    document.getElementById("filter-periodo").addEventListener("change", (e) => { dashFilterPeriodo = e.target.value; renderDashboard(); });
+    document.getElementById("filter-banco").addEventListener("change", (e) => { dashFilterBanco = e.target.value; renderDashboard(); });
+    document.getElementById("btn-demo-data").addEventListener("click", () => {
+      generateDemoData();
+      dashFilterPeriodo = "all"; dashFilterBanco = "all";
+      renderScreen(currentScreen);
+    });
+  }, "filtros do dashboard");
 
-  // bancos
-  document.getElementById("btn-add-inst").addEventListener("click", openAddInstModal);
-  document.body.addEventListener("click", (e) => {
-    const toggleBtn = e.target.closest("[data-toggle-bank]");
-    if (toggleBtn) {
-      toggleBankConnection(toggleBtn.dataset.toggleBank);
-      if (document.getElementById("modal-add-inst").classList.contains("active")) openAddInstModal();
+  wire(() => {
+    document.getElementById("btn-add-inst").addEventListener("click", openAddInstModal);
+    document.body.addEventListener("click", (e) => {
+      const toggleBtn = e.target.closest("[data-toggle-bank]");
+      if (toggleBtn) {
+        toggleBankConnection(toggleBtn.dataset.toggleBank);
+        if (document.getElementById("modal-add-inst").classList.contains("active")) openAddInstModal();
+      }
+    });
+  }, "bancos");
+
+  wire(() => {
+    document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
+    document.getElementById("tx-filter-banco").addEventListener("change", (e) => { txFilterBanco = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
+    document.getElementById("tx-filter-tipo").addEventListener("change", (e) => { txFilterTipo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
+    document.getElementById("tx-list-container").addEventListener("click", (e) => {
+      const loadMoreBtn = e.target.closest("#btn-load-more-tx");
+      if (loadMoreBtn) { txVisibleCount += TX_PAGE_SIZE; renderTransacoes(); return; }
+      const row = e.target.closest("[data-tx-id]");
+      if (row) openTxDetalhe(row.dataset.txId);
+    });
+    document.getElementById("detalhe-body").addEventListener("click", (e) => {
+      const alterarBtn = e.target.closest("#btn-alterar-categoria");
+      const excluirBtn = e.target.closest("#btn-excluir-tx");
+      if (alterarBtn) openCategoriaModal(alterarBtn.dataset.txId);
+      if (excluirBtn) { if (confirm("Excluir esta transação?")) deleteTx(excluirBtn.dataset.txId); }
+    });
+    document.getElementById("cat-grid").addEventListener("click", (e) => {
+      const item = e.target.closest("[data-cat-id]");
+      if (!item) return;
+      pendingCatSelected = item.dataset.catId;
+      document.querySelectorAll("#cat-grid .cat-grid-item").forEach(el => el.classList.remove("selected"));
+      item.classList.add("selected");
+    });
+    document.getElementById("btn-salvar-categoria").addEventListener("click", saveCategoria);
+  }, "transações");
+
+  wire(() => {
+    document.getElementById("cat-segmented").addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn");
+      if (!btn) return;
+      catSegment = btn.dataset.seg;
+      document.querySelectorAll("#cat-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
+      renderCategorias();
+    });
+  }, "categorias");
+
+  wire(() => {
+    document.getElementById("rel-segmented").addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn");
+      if (!btn) return;
+      relSegment = btn.dataset.seg;
+      document.querySelectorAll("#rel-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
+      document.getElementById("rel-geral").classList.toggle("hidden", relSegment !== "geral");
+      document.getElementById("rel-comparar").classList.toggle("hidden", relSegment !== "comparar");
+    });
+    ["rel-ano","rel-mes","rel-banco","rel-categoria"].forEach(id => {
+      document.getElementById(id).addEventListener("change", computeRelGeral);
+    });
+    document.getElementById("btn-comparar").addEventListener("click", renderComparacao);
+  }, "relatórios");
+
+  // boot — roda por último e nunca depende do Google, para garantir
+  // que o app abre mesmo se o login do Google falhar
+  wire(() => {
+    const user = store.getUser();
+    if (user) {
+      document.getElementById("greeting-text").textContent = `Olá, ${user.name.split(" ")[0]}!`;
+      updateAvatar(user);
+      if (!store.getTransactions().length) generateDemoData();
+      showApp();
+    } else {
+      showLogin();
     }
-  });
+  }, "boot");
 
-  // transações
-  document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; renderTransacoes(); });
-  document.getElementById("tx-filter-banco").addEventListener("change", (e) => { txFilterBanco = e.target.value; renderTransacoes(); });
-  document.getElementById("tx-filter-tipo").addEventListener("change", (e) => { txFilterTipo = e.target.value; renderTransacoes(); });
-  document.getElementById("tx-list-container").addEventListener("click", (e) => {
-    const row = e.target.closest("[data-tx-id]");
-    if (row) openTxDetalhe(row.dataset.txId);
-  });
-  document.getElementById("detalhe-body").addEventListener("click", (e) => {
-    const alterarBtn = e.target.closest("#btn-alterar-categoria");
-    const excluirBtn = e.target.closest("#btn-excluir-tx");
-    if (alterarBtn) openCategoriaModal(alterarBtn.dataset.txId);
-    if (excluirBtn) { if (confirm("Excluir esta transação?")) deleteTx(excluirBtn.dataset.txId); }
-  });
-  document.getElementById("cat-grid").addEventListener("click", (e) => {
-    const item = e.target.closest("[data-cat-id]");
-    if (!item) return;
-    pendingCatSelected = item.dataset.catId;
-    document.querySelectorAll("#cat-grid .cat-grid-item").forEach(el => el.classList.remove("selected"));
-    item.classList.add("selected");
-  });
-  document.getElementById("btn-salvar-categoria").addEventListener("click", saveCategoria);
-
-  // categorias
-  document.getElementById("cat-segmented").addEventListener("click", (e) => {
-    const btn = e.target.closest(".seg-btn");
-    if (!btn) return;
-    catSegment = btn.dataset.seg;
-    document.querySelectorAll("#cat-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
-    renderCategorias();
-  });
-
-  // relatórios
-  document.getElementById("rel-segmented").addEventListener("click", (e) => {
-    const btn = e.target.closest(".seg-btn");
-    if (!btn) return;
-    relSegment = btn.dataset.seg;
-    document.querySelectorAll("#rel-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
-    document.getElementById("rel-geral").classList.toggle("hidden", relSegment !== "geral");
-    document.getElementById("rel-comparar").classList.toggle("hidden", relSegment !== "comparar");
-  });
-  ["rel-ano","rel-mes","rel-banco","rel-categoria"].forEach(id => {
-    document.getElementById(id).addEventListener("change", computeRelGeral);
-  });
-  document.getElementById("btn-comparar").addEventListener("click", renderComparacao);
-
-  // boot
-  const user = store.getUser();
-  if (user) {
-    document.getElementById("greeting-text").textContent = `Olá, ${user.name.split(" ")[0]}!`;
-    updateAvatar(user);
-    if (!store.getTransactions().length) generateDemoData();
-    showApp();
-  } else {
-    showLogin();
-  }
+  // Google Sign-In é o último a ser configurado e nunca bloqueia o
+  // restante do app caso o domínio não esteja autorizado no Google
+  // Cloud Console (erro "origin_mismatch").
+  wire(initGoogleLogin, "Google Sign-In");
 });
