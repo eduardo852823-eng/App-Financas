@@ -2,9 +2,10 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>FinanHub</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -18,7 +19,7 @@
     <div class="login-wrap">
       <div class="login-logo">
         <div class="logo-badge">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 18V10" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M10 18V6" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M16 18V13" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M20 18V9" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>
+          <img src="logo.svg" width="34" height="34" alt="FinanHub">
         </div>
         <h1>Finan<span>Hub</span></h1>
         <p>Todas as suas finanças<br>em um só lugar.</p>
@@ -39,14 +40,19 @@
   <div class="modal-overlay" id="modal-email">
     <div class="modal-card">
       <div class="modal-head">
-        <h3>Entrar com e-mail</h3>
+        <h3 id="modal-email-title">Entrar com e-mail</h3>
         <button class="icon-btn" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
-        <label>Nome</label>
-        <input type="text" id="input-name" placeholder="Seu nome" value="seu nome">
+        <div id="field-name-wrap">
+          <label>Nome</label>
+          <input type="text" id="input-name" placeholder="Seu nome">
+        </div>
         <label>E-mail</label>
-        <input type="email" id="input-email" placeholder="voce@email.com" value="seuemail@email.com">
+        <input type="email" id="input-email" placeholder="voce@email.com">
+        <label>Senha</label>
+        <input type="password" id="input-password" placeholder="Sua senha">
+        <div class="form-error hidden" id="auth-error"></div>
         <button class="btn btn-primary" id="btn-do-email-login">Entrar</button>
       </div>
     </div>
@@ -75,7 +81,7 @@
 
       <!-- ---------- DASHBOARD ---------- -->
       <section class="screen screen-dashboard active" data-screen="inicio">
-        <p class="greeting" id="greeting-text">Olá, Dudu!</p>
+        <p class="greeting" id="greeting-text">Olá!</p>
         <p class="subtext">Aqui está um resumo das suas finanças.</p>
 
         <div class="card card-balance">
@@ -117,6 +123,9 @@
         </div>
 
         <button class="btn btn-outline btn-demo" id="btn-demo-data">Usar dados de demonstração</button>
+        <label class="checkbox-row">
+          <input type="checkbox" id="chk-modo-teste"> Modo teste (valores menores)
+        </label>
       </section>
 
       <!-- ---------- BANCOS ---------- -->
@@ -139,6 +148,7 @@
             <option value="entrada">Entradas</option>
             <option value="saida">Saídas</option>
           </select>
+          <select id="tx-filter-categoria"><option value="all">Todas categorias</option></select>
         </div>
         <div id="tx-list-container"></div>
       </section>
@@ -256,7 +266,7 @@
   <div class="modal-overlay" id="modal-categoria">
     <div class="modal-card">
       <div class="modal-head">
-        <h3>Alterar categoria, gostou lu?</h3>
+        <h3>Alterar categoria</h3>
         <button class="icon-btn" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
@@ -280,25 +290,58 @@
     </div>
   </div>
 
-  <!-- ===================== PERFIL (modal) ===================== -->
+  <!-- ===================== PERFIL (modal, estilo menu lateral) ===================== -->
   <div class="modal-overlay" id="modal-perfil">
-    <div class="modal-card">
+    <div class="modal-card modal-card-menu">
       <div class="modal-head">
-        <h3>Perfil</h3>
-        <button class="icon-btn" data-close-modal>&times;</button>
-      </div>
-      <div class="modal-body">
         <div class="profile-row">
           <img id="perfil-avatar" class="avatar-img-lg hidden" alt="">
           <div id="perfil-avatar-icon" class="avatar-icon-lg">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
           </div>
           <div>
-            <div class="profile-name" id="perfil-nome">Dudu Silva</div>
-            <div class="profile-email" id="perfil-email">dudu@email.com</div>
+            <div class="profile-name" id="perfil-nome">—</div>
+            <div class="profile-email" id="perfil-email">—</div>
           </div>
         </div>
-        <button class="btn btn-outline" id="btn-logout" style="margin-top:20px">Sair</button>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <nav class="profile-menu">
+          <button class="profile-menu-item" data-nav="inicio" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+            Início
+          </button>
+          <button class="profile-menu-item" data-nav="bancos" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M4 21V9l8-6 8 6v12M9 21V12h6v9"/></svg>
+            Minhas instituições
+          </button>
+          <button class="profile-menu-item" data-nav="transacoes" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/></svg>
+            Transações
+          </button>
+          <button class="profile-menu-item" data-nav="categorias" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+            Categorias
+          </button>
+          <button class="profile-menu-item" data-nav="relatorios" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
+            Relatórios
+          </button>
+          <div class="profile-menu-sep"></div>
+          <button class="profile-menu-item" id="btn-theme-toggle-2">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
+            Modo escuro
+          </button>
+          <button class="profile-menu-item" id="btn-ajuda">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 1.7-2 3.2"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>
+            Ajuda
+          </button>
+          <button class="profile-menu-item danger" id="btn-logout">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+            Sair
+          </button>
+        </nav>
       </div>
     </div>
   </div>

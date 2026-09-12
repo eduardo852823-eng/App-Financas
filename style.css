@@ -373,6 +373,64 @@ a{text-decoration:none; color:inherit;}
   padding:5px 10px; border-radius:20px; margin-bottom:14px;
 }
 
+/* ===================== FORM ERROR / CHECKBOX ===================== */
+.form-error{
+  background:var(--red-bg); color:var(--red); font-size:13px; font-weight:600;
+  padding:9px 12px; border-radius:var(--radius-sm); margin-top:10px;
+}
+.checkbox-row{
+  display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px;
+  color:var(--text-secondary); font-weight:600; cursor:pointer;
+}
+.checkbox-row input{width:16px; height:16px; accent-color:var(--blue);}
+
+/* ===================== PERFIL — menu estilo print ===================== */
+.modal-card-menu .modal-head{align-items:flex-start;}
+.modal-card-menu .profile-row{flex:1;}
+.profile-menu{display:flex; flex-direction:column; gap:2px;}
+.profile-menu-item{
+  display:flex; align-items:center; gap:12px; background:none; border:none; cursor:pointer;
+  padding:13px 6px; font-size:14.5px; font-weight:600; color:var(--text-main);
+  border-radius:var(--radius-sm); text-align:left; width:100%;
+}
+.profile-menu-item:active{background:var(--gray-100);}
+.profile-menu-item.danger{color:var(--red);}
+.profile-menu-sep{height:1px; background:var(--gray-100); margin:8px 0;}
+
+/* tx-meta agora também mostra a categoria */
+.tx-meta{display:flex; align-items:center; gap:4px; flex-wrap:wrap;}
+.tx-cat-chip{
+  display:inline-flex; align-items:center; gap:3px; background:var(--gray-100);
+  padding:1px 7px; border-radius:20px; font-size:11px; font-weight:600; color:var(--text-secondary);
+}
+
+/* estado de carregamento simples */
+.loading-state{text-align:center; padding:40px 20px; color:var(--text-secondary); font-size:14px;}
+.spinner{
+  width:26px; height:26px; border-radius:50%; margin:0 auto 12px;
+  border:3px solid var(--gray-300); border-top-color:var(--blue);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ===================== RESPONSIVO ===================== */
 @media (min-width:600px){
   .app{box-shadow:0 0 40px rgba(20,33,61,0.08);}
 }
+@media (min-width:820px){
+  .app{max-width:900px;}
+  .content{padding:24px 40px 110px;}
+  .row-cards{display:grid; grid-template-columns:1fr 1fr;}
+  .filters-grid{grid-template-columns:1fr 1fr 1fr 1fr;}
+  .cat-grid{grid-template-columns:repeat(4,1fr);}
+  .bottom-nav{max-width:900px;}
+  .screen-dashboard{display:grid; grid-template-columns:1fr 1fr; gap:0 24px;}
+  .screen-dashboard .card-balance,
+  .screen-dashboard .greeting,
+  .screen-dashboard .subtext{grid-column:1 / -1;}
+}
+@media (max-width:360px){
+  .content{padding:14px 12px 96px;}
+  .card-balance-value{font-size:26px;}
+}
+
