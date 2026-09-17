@@ -1,0 +1,5 @@
+node_modules/
+.env
+finanhub.db
+finanhub.db-shm
+finanhub.db-wal
