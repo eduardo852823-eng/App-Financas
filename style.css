@@ -245,9 +245,11 @@ a{text-decoration:none; color:inherit;}
 /* ===================== BANCOS ===================== */
 .banks-list{display:flex; flex-direction:column; gap:10px;}
 .bank-row{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
   background:var(--card-bg); border-radius:var(--radius-md); padding:14px 16px; box-shadow:var(--shadow);
 }
+.bank-row .bank-row-left{flex:1 1 180px; min-width:0;}
+.bank-row-name, .bank-status{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .bank-row-left{display:flex; align-items:center; gap:12px;}
 .bank-avatar{width:42px; height:42px; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:14px;}
 .bank-row-name{font-weight:700; font-size:14.5px;}

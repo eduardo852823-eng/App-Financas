@@ -62,7 +62,8 @@ const state = {
   user: null,
   preferences: { theme: "light", currency: "BRL" },
   institutions: [],
-  transactions: []
+  transactions: [],
+  pluggyItems: []
 };
 
 async function refreshMe() {
@@ -73,12 +74,29 @@ async function refreshMe() {
 }
 async function refreshInstitutions() { state.institutions = await api("/institutions"); }
 async function refreshTransactions() { state.transactions = await api("/transactions"); }
+async function refreshPluggyItems() {
+  try { state.pluggyItems = await api("/pluggy/items"); }
+  catch (e) { state.pluggyItems = []; }
+}
 async function refreshAll() {
-  await Promise.all([refreshMe(), refreshInstitutions(), refreshTransactions()]);
+  await Promise.all([refreshMe(), refreshInstitutions(), refreshTransactions(), refreshPluggyItems()]);
 }
 
+const PLUGGY_COLOR_PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#7C3AED", "#0891B2", "#DB2777"];
+function pluggyColorFor(itemId) {
+  let hash = 0;
+  for (let i = 0; i < itemId.length; i++) hash = (hash * 31 + itemId.charCodeAt(i)) >>> 0;
+  return PLUGGY_COLOR_PALETTE[hash % PLUGGY_COLOR_PALETTE.length];
+}
+function isPluggyBank(bankId) {
+  return state.pluggyItems.some(p => p.item_id === bankId);
+}
 function instInfo(id) {
-  return state.institutions.find(i => i.id === id) || { name: id, color: "#94A3B8" };
+  const demo = state.institutions.find(i => i.id === id);
+  if (demo) return demo;
+  const pluggy = state.pluggyItems.find(p => p.item_id === id);
+  if (pluggy) return { id, name: pluggy.institution_name || "Conta conectada", color: pluggyColorFor(id), connected: true };
+  return { name: id, color: "#94A3B8" };
 }
 function effectiveCategory(t) { return t.category; }
 
@@ -125,6 +143,7 @@ async function toggleTheme() {
     try { await api("/me/preferences", { method: "PUT", body: { theme: next, currency: state.preferences.currency } }); }
     catch (e) { console.warn("não foi possível salvar a preferência de tema", e); }
   }
+  if (currentScreen === "inicio" || currentScreen === "relatorios") renderScreen(currentScreen);
 }
 
 /* ============================================================
@@ -235,19 +254,26 @@ function renderDashboard() {
   renderLegend("donut-legend", byCat, saidas);
 }
 
+function themeColor(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
 function drawDonut(canvasId, byCat, total) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
   const cx = w/2, cy = h/2, rOuter = Math.min(w,h)/2 - 6, rInner = rOuter * 0.62;
+  const holeColor = themeColor("--card-bg") || "#FFFFFF";
+  const textMain = themeColor("--text-main") || "#14213D";
+  const textSecondary = themeColor("--text-secondary") || "#6B7A90";
+  const emptyBg = themeColor("--gray-100") || "#EEF2F8";
   if (!total || Object.keys(byCat).length === 0) {
     ctx.beginPath();
     ctx.arc(cx, cy, rOuter, 0, Math.PI*2);
-    ctx.fillStyle = "#EEF2F8";
+    ctx.fillStyle = emptyBg;
     ctx.fill();
     ctx.font = "600 13px Inter, sans-serif";
-    ctx.fillStyle = "#6B7A90";
+    ctx.fillStyle = textSecondary;
     ctx.textAlign = "center";
     ctx.fillText("Sem dados", cx, cy+4);
     return;
@@ -266,14 +292,14 @@ function drawDonut(canvasId, byCat, total) {
   });
   ctx.beginPath();
   ctx.arc(cx, cy, rInner, 0, Math.PI*2);
-  ctx.fillStyle = "#FFFFFF";
+  ctx.fillStyle = holeColor;
   ctx.fill();
   ctx.font = "700 15px Inter, sans-serif";
-  ctx.fillStyle = "#14213D";
+  ctx.fillStyle = textMain;
   ctx.textAlign = "center";
   ctx.fillText(fmtBRL(total), cx, cy+2);
   ctx.font = "600 11px Inter, sans-serif";
-  ctx.fillStyle = "#6B7A90";
+  ctx.fillStyle = textSecondary;
   ctx.fillText("gastos", cx, cy+18);
 }
 
@@ -295,6 +321,7 @@ function renderLegend(elId, byCat, total) {
    BANCOS
    ============================================================ */
 function renderBancos() {
+  renderPluggyItems();
   const el = document.getElementById("banks-list");
   el.innerHTML = state.institutions.map(i => `
     <div class="bank-row">
@@ -416,6 +443,7 @@ function openTxDetalhe(id) {
     <div class="detalhe-info-row"><span>Banco</span><span>${info.name}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
     <div class="detalhe-info-row"><span>Tipo</span><span>${isPos ? "Entrada" : "Saída"}</span></div>
+    <div class="detalhe-info-row"><span>Origem</span><span>${isPluggyBank(t.bank_id) ? "Open Finance (real)" : "Demonstração"}</span></div>
     <div class="detalhe-info-row"><span>ID da transação</span><span>#${t.id}</span></div>
     <button class="btn btn-primary" id="btn-alterar-categoria" data-tx-id="${t.id}">Alterar categoria</button>
     <button class="btn btn-danger" id="btn-excluir-tx" data-tx-id="${t.id}">Excluir</button>
@@ -565,19 +593,22 @@ function drawBarChart(canvasId, byMonth) {
   const maxVal = Math.max(1, ...months.flatMap(m => [byMonth[m].entrada, byMonth[m].saida]));
   const padding = 24;
   const groupW = (w - padding) / 12;
+  const textSecondary = themeColor("--text-secondary") || "#6B7A90";
+  const greenColor = themeColor("--green") || "#16A34A";
+  const redColor = themeColor("--red") || "#E5484D";
   ctx.font = "600 9px Inter, sans-serif";
-  ctx.fillStyle = "#6B7A90";
+  ctx.fillStyle = textSecondary;
   ctx.textAlign = "center";
   months.forEach(m => {
     const x = padding + m*groupW;
     const barW = groupW/2 - 4;
     const eH = (byMonth[m].entrada/maxVal) * (h - 44);
     const sH = (byMonth[m].saida/maxVal) * (h - 44);
-    ctx.fillStyle = "#16A34A";
+    ctx.fillStyle = greenColor;
     ctx.fillRect(x+2, h-20-eH, barW, eH);
-    ctx.fillStyle = "#E5484D";
+    ctx.fillStyle = redColor;
     ctx.fillRect(x+2+barW+2, h-20-sH, barW, sH);
-    ctx.fillStyle = "#6B7A90";
+    ctx.fillStyle = textSecondary;
     ctx.fillText(MONTH_NAMES[m].slice(0,3), x+groupW/2, h-6);
   });
 }
@@ -679,6 +710,137 @@ function initGoogleLogin() {
 }
 
 /* ============================================================
+   CONFIGURAÇÕES
+   ============================================================ */
+function openConfiguracoes() {
+  document.getElementById("cfg-nome").value = state.user?.name || "";
+  document.getElementById("cfg-email").value = state.user?.email || "";
+  document.getElementById("cfg-moeda").value = state.preferences.currency || "BRL";
+  document.getElementById("cfg-modo-escuro").checked = document.documentElement.getAttribute("data-theme") === "dark";
+  openModal("modal-configuracoes");
+}
+async function saveConfiguracoes() {
+  const currency = document.getElementById("cfg-moeda").value;
+  const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  try {
+    await api("/me/preferences", { method: "PUT", body: { theme, currency } });
+    state.preferences.currency = currency;
+  } catch (e) { console.warn("não foi possível salvar configurações", e); }
+  closeAllModals();
+}
+
+/* ============================================================
+   PLUGGY (Open Finance) — conectar bancos reais, vários CPFs
+   ============================================================ */
+function renderPluggyItems() {
+  const el = document.getElementById("pluggy-items-list");
+  if (!el) return;
+  if (!state.pluggyItems.length) {
+    el.innerHTML = `<div class="empty-state">Nenhuma conta real conectada ainda.</div>`;
+    return;
+  }
+  el.innerHTML = state.pluggyItems.map(p => `
+    <div class="bank-row">
+      <div class="bank-row-left">
+        <div class="bank-avatar" style="background:${pluggyColorFor(p.item_id)}">${initials(p.institution_name || "Conta")}</div>
+        <div>
+          <div class="bank-row-name">${p.institution_name || "Conta conectada"}</div>
+          <div class="bank-status connected"><span class="dot-status"></span>CPF ${maskCpf(p.cpf)} • última sinc.: ${p.last_sync ? new Date(p.last_sync).toLocaleString("pt-BR") : "nunca"}</div>
+        </div>
+      </div>
+      <button class="btn-connect connected" data-pluggy-sync="${p.item_id}">Sincronizar</button>
+      <button class="btn btn-danger" style="margin-left:6px;padding:8px 10px" data-pluggy-remove="${p.id}">Remover</button>
+    </div>
+  `).join("");
+}
+function maskCpf(cpf) {
+  if (!cpf) return "—";
+  const digits = cpf.replace(/\D/g, "");
+  if (digits.length !== 11) return cpf;
+  return `${digits.slice(0,3)}.***.**${digits.slice(9,11) ? "*-" + digits.slice(9,11) : ""}`;
+}
+
+let pluggyPendingCpf = null;
+
+function openPluggyCpfModal() {
+  document.getElementById("input-pluggy-cpf").value = "";
+  document.getElementById("pluggy-error").classList.add("hidden");
+  openModal("modal-pluggy-cpf");
+}
+
+async function startPluggyConnect() {
+  const cpfInput = document.getElementById("input-pluggy-cpf").value.trim();
+  const digits = cpfInput.replace(/\D/g, "");
+  if (digits.length !== 11) {
+    const err = document.getElementById("pluggy-error");
+    err.textContent = "Informe um CPF válido (11 dígitos).";
+    err.classList.remove("hidden");
+    return;
+  }
+  pluggyPendingCpf = digits;
+  closeAllModals();
+
+  if (typeof PluggyConnect === "undefined") {
+    alert("O widget do Pluggy ainda não carregou. Verifique sua conexão e tente novamente.");
+    return;
+  }
+
+  try {
+    const { connectToken } = await api("/pluggy/connect-token", { method: "POST" });
+    const pluggyConnect = new PluggyConnect({
+      connectToken,
+      includeSandbox: true, // permite usar os conectores de teste do Pluggy em modo sandbox
+      onSuccess: async (itemData) => {
+        try {
+          await api("/pluggy/items", {
+            method: "POST",
+            body: {
+              itemId: itemData.item.id,
+              cpf: pluggyPendingCpf,
+              institutionName: itemData.item.connector?.name || "Conta conectada"
+            }
+          });
+          await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
+          await Promise.all([refreshPluggyItems(), refreshTransactions()]);
+          renderScreen(currentScreen);
+        } catch (e) {
+          alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
+        }
+      },
+      onError: (error) => {
+        console.error("Erro no Pluggy Connect:", error);
+        alert("Não foi possível concluir a conexão com o banco.");
+      }
+    });
+    pluggyConnect.init();
+  } catch (e) {
+    alert("Erro ao iniciar conexão com o Pluggy: " + e.message);
+  }
+}
+
+async function syncPluggyItem(itemId) {
+  try {
+    const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
+    await refreshTransactions();
+    renderScreen(currentScreen);
+    alert(`Sincronizado! ${r.transacoesProcessadas} transações verificadas.`);
+  } catch (e) {
+    alert("Erro ao sincronizar: " + e.message);
+  }
+}
+
+async function removePluggyItem(id) {
+  if (!confirm("Remover esta conexão bancária?")) return;
+  try {
+    await api(`/pluggy/items/${id}`, { method: "DELETE" });
+    await Promise.all([refreshPluggyItems(), refreshTransactions()]);
+    renderScreen(currentScreen);
+  } catch (e) {
+    alert("Erro ao remover: " + e.message);
+  }
+}
+
+/* ============================================================
    EVENT WIRING
    ============================================================ */
 function wire(fn, label) {
@@ -714,8 +876,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
     document.getElementById("btn-logout").addEventListener("click", logoutUser);
     document.getElementById("btn-ajuda").addEventListener("click", () => alert("Precisa de ajuda? Fale com o suporte pelo e-mail contato@finanhub.com.br"));
-    document.getElementById("btn-theme-toggle-2").addEventListener("click", toggleTheme);
+    document.getElementById("btn-configuracoes").addEventListener("click", openConfiguracoes);
   }, "perfil");
+
+  wire(() => {
+    document.getElementById("cfg-modo-escuro").addEventListener("change", toggleTheme);
+    document.getElementById("btn-salvar-config").addEventListener("click", saveConfiguracoes);
+  }, "configurações");
 
   wire(() => {
     document.getElementById("btn-theme-toggle").addEventListener("click", toggleTheme);
@@ -761,6 +928,17 @@ document.addEventListener("DOMContentLoaded", () => {
       if (toggleBtn) toggleBankConnection(toggleBtn.dataset.toggleBank);
     });
   }, "bancos");
+
+  wire(() => {
+    document.getElementById("btn-pluggy-connect").addEventListener("click", openPluggyCpfModal);
+    document.getElementById("btn-pluggy-continuar").addEventListener("click", startPluggyConnect);
+    document.getElementById("pluggy-items-list").addEventListener("click", (e) => {
+      const syncBtn = e.target.closest("[data-pluggy-sync]");
+      const removeBtn = e.target.closest("[data-pluggy-remove]");
+      if (syncBtn) syncPluggyItem(syncBtn.dataset.pluggySync);
+      if (removeBtn) removePluggyItem(removeBtn.dataset.pluggyRemove);
+    });
+  }, "pluggy");
 
   wire(() => {
     document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
