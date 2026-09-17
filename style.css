@@ -198,20 +198,28 @@ a{text-decoration:none; color:inherit;}
   }
 }
 .card-balance{
-  background:linear-gradient(135deg,var(--blue) 0%, #1D4ED8 100%);
-  color:#fff; box-shadow:0 10px 26px rgba(37,99,235,0.28);
+  background:linear-gradient(135deg,var(--blue) 0%, #1D4ED8 60%, #172554 100%);
+  color:#fff; box-shadow:0 14px 34px rgba(37,99,235,0.32);
+  position:relative; overflow:hidden; border-radius:20px;
 }
-.card-balance-top{display:flex; justify-content:space-between; align-items:center;}
-.card-label{font-size:13px; opacity:.9; display:flex; align-items:center; gap:6px; font-weight:500;}
-.card-balance-value{font-size:34px; font-weight:800; margin-top:10px; letter-spacing:-0.5px;}
-.card-balance-sub{font-size:13px; margin-top:6px; opacity:.9;}
+.card-balance::before{
+  content:""; position:absolute; top:-60px; right:-60px; width:180px; height:180px;
+  background:radial-gradient(circle, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 70%);
+  pointer-events:none;
+}
+.card-balance-top{display:flex; justify-content:space-between; align-items:center; position:relative; z-index:1;}
+.card-label{font-size:13px; opacity:.92; display:flex; align-items:center; gap:6px; font-weight:600; letter-spacing:.2px;}
+.card-balance-value{font-size:36px; font-weight:800; margin-top:10px; letter-spacing:-0.6px; position:relative; z-index:1; text-shadow:0 2px 12px rgba(0,0,0,.15);}
+.card-balance-sub{font-size:13px; margin-top:6px; opacity:.85; position:relative; z-index:1;}
 
 .row-cards{display:flex; gap:12px; margin-bottom:16px;}
-.card-mini{flex:1; display:flex; flex-direction:column; gap:6px; padding:16px; margin-bottom:0;}
-.mini-label{font-size:12.5px; color:var(--text-secondary); font-weight:600;}
-.mini-value{font-size:18px; font-weight:700; color:var(--text-main);}
+.card-mini{flex:1; display:flex; flex-direction:column; gap:6px; padding:16px; margin-bottom:0; border-radius:16px;}
+.mini-label{font-size:12.5px; color:var(--text-secondary); font-weight:600; display:flex; align-items:center; gap:5px;}
+.mini-value{font-size:19px; font-weight:800; color:var(--text-main); letter-spacing:-0.3px;}
+.card-green{border-left:3px solid var(--green);}
 .card-green .mini-label{color:var(--green);}
 .card-green .mini-value{color:var(--green);}
+.card-red{border-left:3px solid var(--red);}
 .card-red .mini-label{color:var(--red);}
 .card-red .mini-value{color:var(--red);}
 .card-result{display:flex; flex-direction:row; align-items:center; justify-content:space-between;}

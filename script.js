@@ -1,5 +1,5 @@
 /* ============================================================
-   FinanHub — front-end
+   FinanApp — front-end
    Agora conectado a um backend real (Node + Express + SQLite).
    Só o token de login fica no localStorage; todo o resto (perfil,
    saldo, bancos, transações, preferências) vive no banco de dados.
@@ -232,10 +232,13 @@ function renderDashboard() {
   document.getElementById("total-saidas").textContent = fmtBRL(saidas);
   document.getElementById("balance-change").textContent = txs.length ? `${txs.length} transações no período` : "Nenhuma transação no período";
 
-  const institutions = state.institutions.filter(i => i.connected);
   const allTx = state.transactions;
   const banksScroll = document.getElementById("banks-scroll");
-  banksScroll.innerHTML = institutions.map(i => {
+  const bankIdsWithTx = [...new Set(allTx.map(t => t.bank_id))];
+  const banksToShow = bankIdsWithTx
+    .map(id => instInfo(id))
+    .filter(i => i && i.name);
+  banksScroll.innerHTML = banksToShow.map(i => {
     const bal = allTx.filter(t => t.bank_id === i.id).reduce((s,t) => s + t.value, 0);
     return `<div class="bank-chip">
       <div class="bank-icon" style="background:${i.color}">${initials(i.name)}</div>
@@ -574,9 +577,7 @@ function computeRelGeral() {
     const m = parseInt(t.date.slice(5,7))-1;
     if (t.type === "entrada") byMonth[m].entrada += t.value; else byMonth[m].saida += Math.abs(t.value);
   });
-  drawBarChart("bar-chart", byMonth);
-
-  const connected = state.institutions.filter(i => i.connected);
+  const connected = [...new Set(txs.map(t => t.bank_id))].map(id => instInfo(id)).filter(i => i && i.name);
   const el = document.getElementById("rel-por-banco");
   el.innerHTML = connected.map(i => {
     const val = txs.filter(t => t.bank_id === i.id && t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
@@ -844,7 +845,7 @@ async function removePluggyItem(id) {
    EVENT WIRING
    ============================================================ */
 function wire(fn, label) {
-  try { fn(); } catch (err) { console.error(`FinanHub: falha ao configurar "${label}"`, err); }
+  try { fn(); } catch (err) { console.error(`FinanApp: falha ao configurar "${label}"`, err); }
 }
 
 initTheme();
@@ -875,7 +876,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
     document.getElementById("btn-logout").addEventListener("click", logoutUser);
-    document.getElementById("btn-ajuda").addEventListener("click", () => alert("Precisa de ajuda? Fale com o suporte pelo e-mail contato@finanhub.com.br"));
+    document.getElementById("btn-ajuda").addEventListener("click", () => alert("Precisa de ajuda? Fale com o suporte pelo e-mail eduardo8528233@gmail.com"));
     document.getElementById("btn-configuracoes").addEventListener("click", openConfiguracoes);
   }, "perfil");
 
