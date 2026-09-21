@@ -61,7 +61,6 @@ const auth = {
 const state = {
   user: null,
   preferences: { theme: "light", currency: "BRL" },
-  institutions: [],
   transactions: [],
   pluggyItems: []
 };
@@ -72,14 +71,13 @@ async function refreshMe() {
   state.preferences = preferences;
   return user;
 }
-async function refreshInstitutions() { state.institutions = await api("/institutions"); }
 async function refreshTransactions() { state.transactions = await api("/transactions"); }
 async function refreshPluggyItems() {
   try { state.pluggyItems = await api("/pluggy/items"); }
   catch (e) { state.pluggyItems = []; }
 }
 async function refreshAll() {
-  await Promise.all([refreshMe(), refreshInstitutions(), refreshTransactions(), refreshPluggyItems()]);
+  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems()]);
 }
 
 const PLUGGY_COLOR_PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#7C3AED", "#0891B2", "#DB2777"];
@@ -91,9 +89,11 @@ function pluggyColorFor(itemId) {
 function isPluggyBank(bankId) {
   return state.pluggyItems.some(p => p.item_id === bankId);
 }
+// Bancos conectados (Pluggy) no formato usado pelos filtros: { id, name, color }
+function connectedBanks() {
+  return state.pluggyItems.map(p => ({ id: p.item_id, name: p.institution_name || "Conta conectada", color: pluggyColorFor(p.item_id) }));
+}
 function instInfo(id) {
-  const demo = state.institutions.find(i => i.id === id);
-  if (demo) return demo;
   const pluggy = state.pluggyItems.find(p => p.item_id === id);
   if (pluggy) return { id, name: pluggy.institution_name || "Conta conectada", color: pluggyColorFor(id), connected: true };
   return { name: id, color: "#94A3B8" };
@@ -210,7 +210,7 @@ function populateDashboardFilters() {
   periodoSel.value = dashFilterPeriodo;
 
   const bancoSel = document.getElementById("filter-banco");
-  const institutions = state.institutions.filter(i => i.connected);
+  const institutions = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
     institutions.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
   bancoSel.value = dashFilterBanco;
@@ -325,48 +325,6 @@ function renderLegend(elId, byCat, total) {
    ============================================================ */
 function renderBancos() {
   renderPluggyItems();
-  const el = document.getElementById("banks-list");
-  el.innerHTML = state.institutions.map(i => `
-    <div class="bank-row">
-      <div class="bank-row-left">
-        <div class="bank-avatar" style="background:${i.color}">${initials(i.name)}</div>
-        <div>
-          <div class="bank-row-name">${i.name}</div>
-          <div class="bank-status ${i.connected ? "connected" : "disconnected"}">
-            <span class="dot-status"></span>${i.connected ? "Conectado" : "Não conectado"}
-          </div>
-        </div>
-      </div>
-      <button class="btn-connect ${i.connected ? "connected" : ""}" data-toggle-bank="${i.id}">
-        ${i.connected ? "Desconectar" : "Conectar"}
-      </button>
-    </div>
-  `).join("");
-}
-
-async function toggleBankConnection(id) {
-  const modoTeste = document.getElementById("chk-modo-teste")?.checked || false;
-  await api(`/institutions/${id}/toggle`, { method: "POST", body: { modoTeste } });
-  await Promise.all([refreshInstitutions(), refreshTransactions()]);
-  renderBancos();
-  if (document.getElementById("modal-add-inst").classList.contains("active")) openAddInstModal();
-  if (currentScreen === "inicio") renderDashboard();
-}
-
-function openAddInstModal() {
-  const el = document.getElementById("add-inst-list");
-  el.innerHTML = state.institutions.map(i => `
-    <div class="add-inst-item">
-      <div class="bank-row-left">
-        <div class="bank-avatar" style="background:${i.color}">${initials(i.name)}</div>
-        <span style="font-weight:600;font-size:14px">${i.name}</span>
-      </div>
-      <button class="btn-connect ${i.connected ? "connected" : ""}" data-toggle-bank="${i.id}">
-        ${i.connected ? "Conectado" : "Conectar"}
-      </button>
-    </div>
-  `).join("");
-  openModal("modal-add-inst");
 }
 
 /* ============================================================
@@ -374,7 +332,7 @@ function openAddInstModal() {
    ============================================================ */
 function populateTxFilters() {
   const bancoSel = document.getElementById("tx-filter-banco");
-  const connected = state.institutions.filter(i => i.connected);
+  const connected = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
     connected.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
   bancoSel.value = txFilterBanco;
@@ -446,7 +404,7 @@ function openTxDetalhe(id) {
     <div class="detalhe-info-row"><span>Banco</span><span>${info.name}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
     <div class="detalhe-info-row"><span>Tipo</span><span>${isPos ? "Entrada" : "Saída"}</span></div>
-    <div class="detalhe-info-row"><span>Origem</span><span>${isPluggyBank(t.bank_id) ? "Open Finance (real)" : "Demonstração"}</span></div>
+    <div class="detalhe-info-row"><span>Origem</span><span>${isPluggyBank(t.bank_id) ? "Open Finance (real)" : "Manual"}</span></div>
     <div class="detalhe-info-row"><span>ID da transação</span><span>#${t.id}</span></div>
     <button class="btn btn-primary" id="btn-alterar-categoria" data-tx-id="${t.id}">Alterar categoria</button>
     <button class="btn btn-danger" id="btn-excluir-tx" data-tx-id="${t.id}">Excluir</button>
@@ -530,7 +488,7 @@ function populateRelatorioFilters() {
   mesSel.innerHTML = `<option value="all">Todos os meses</option>` + MONTH_NAMES.map((m,i) => `<option value="${i}">${m}</option>`).join("");
 
   const bancoSel = document.getElementById("rel-banco");
-  const connected = state.institutions.filter(i => i.connected);
+  const connected = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos</option>` + connected.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
 
   const catSel = document.getElementById("rel-categoria");
@@ -790,7 +748,7 @@ async function startPluggyConnect() {
     const { connectToken } = await api("/pluggy/connect-token", { method: "POST" });
     const pluggyConnect = new PluggyConnect({
       connectToken,
-      includeSandbox: true, // permite usar os conectores de teste do Pluggy em modo sandbox
+      includeSandbox: false, // false = só conectores reais (MeuPluggy e bancos); true mostra os bancos fake de teste
       onSuccess: async (itemData) => {
         try {
           await api("/pluggy/items", {
@@ -913,22 +871,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("filter-periodo").addEventListener("change", (e) => { dashFilterPeriodo = e.target.value; renderDashboard(); });
     document.getElementById("filter-banco").addEventListener("change", (e) => { dashFilterBanco = e.target.value; renderDashboard(); });
-    document.getElementById("btn-demo-data").addEventListener("click", async () => {
-      const modoTeste = document.getElementById("chk-modo-teste").checked;
-      await api("/demo", { method: "POST", body: { modoTeste } });
-      await Promise.all([refreshInstitutions(), refreshTransactions()]);
-      dashFilterPeriodo = "all"; dashFilterBanco = "all";
-      renderScreen(currentScreen);
-    });
   }, "filtros do dashboard");
-
-  wire(() => {
-    document.getElementById("btn-add-inst").addEventListener("click", openAddInstModal);
-    document.body.addEventListener("click", (e) => {
-      const toggleBtn = e.target.closest("[data-toggle-bank]");
-      if (toggleBtn) toggleBankConnection(toggleBtn.dataset.toggleBank);
-    });
-  }, "bancos");
 
   wire(() => {
     document.getElementById("btn-pluggy-connect").addEventListener("click", openPluggyCpfModal);

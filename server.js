@@ -102,23 +102,10 @@ CREATE TABLE IF NOT EXISTS pluggy_items (
 }
 
 /* ============================================================
-   DADOS ESTÁTICOS (bancos, categorias, regras) — iguais ao front
+   DADOS ESTÁTICOS (categorias, regras)
    ============================================================ */
-const ALL_INSTITUTIONS = [
-  { id: "inter", name: "Banco Inter", color: "#FF7A00" },
-  { id: "bb", name: "Banco do Brasil", color: "#FFCC29" },
-  { id: "caixa", name: "Caixa Econômica", color: "#0072CE" },
-  { id: "nubank", name: "Nubank", color: "#820AD1" },
-  { id: "itau", name: "Itaú", color: "#EC7000" },
-  { id: "bradesco", name: "Bradesco", color: "#CC092F" },
-  { id: "santander", name: "Santander", color: "#EC0000" },
-  { id: "brb", name: "BRB", color: "#0033A0" },
-  { id: "c6", name: "C6 Bank", color: "#1A1A1A" },
-  { id: "btg", name: "BTG", color: "#0A0A0A" },
-  { id: "mp", name: "Mercado Pago", color: "#00A9E0" },
-  { id: "sicoob", name: "Sicoob", color: "#00A651" },
-  { id: "sicredi", name: "Sicredi", color: "#7AB800" }
-];
+// IDs dos bancos fictícios antigos (usados só para limpar dados de exemplo que ficaram salvos)
+const DEMO_BANK_IDS = ["inter", "bb", "caixa", "nubank", "itau", "bradesco", "santander", "brb", "c6", "btg", "mp", "sicoob", "sicredi"];
 
 const CATEGORY_RULES = [
   { match: ["ifood", "restaurante", "mercado", "supermercado", "padaria"], cat: "alimentacao" },
@@ -136,53 +123,6 @@ function categorize(desc) {
   return "nao_identificada";
 }
 function roundVal(v) { return Math.round(v * 100) / 100; }
-
-/* ============================================================
-   GERADOR DE TRANSAÇÕES (modo demo)
-   ============================================================ */
-const OUT_DESCS = [
-  ["IFOOD", "alimentacao"], ["UBER", "transporte"], ["STEAM", "entretenimento"],
-  ["NETFLIX", "entretenimento"], ["POSTO SHELL", "transporte"], ["MERCADO EXTRA", "alimentacao"],
-  ["FARMACIA SP", "saude"], ["AMAZON", "compras"], ["CONTA DE LUZ", "contas"],
-  ["INTERNET FIBRA", "contas"], ["RESTAURANTE", "alimentacao"], ["SHOPEE", "compras"],
-  ["CURSO ONLINE", "educacao"], ["ACADEMIA", "saude"]
-];
-const IN_DESCS = ["PIX recebido", "Salário", "Pagamento recebido"];
-
-async function generateTransactionsForBank(userId, bankId, { months = 6, modoTeste = false } = {}) {
-  const fatorTeste = modoTeste ? 0.1 : 1;
-  const now = new Date();
-  const statements = [];
-  for (let m = 0; m < months; m++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
-    const year = d.getFullYear(), month = d.getMonth();
-    statements.push({
-      sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category) VALUES (?,?,?,?,?,?,?)`,
-      args: [userId, dateStr(year, month, 3), "Salário", bankId, roundVal((1800 + Math.random() * 1200) * fatorTeste), "entrada", "salario"]
-    });
-    const numTx = 6 + Math.floor(Math.random() * 5);
-    for (let i = 0; i < numTx; i++) {
-      const day = 1 + Math.floor(Math.random() * 27);
-      if (Math.random() < 0.12) {
-        const desc = IN_DESCS[Math.floor(Math.random() * IN_DESCS.length)];
-        statements.push({
-          sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category) VALUES (?,?,?,?,?,?,?)`,
-          args: [userId, dateStr(year, month, day), desc, bankId, roundVal((50 + Math.random() * 300) * fatorTeste), "entrada", "salario"]
-        });
-      } else {
-        const [desc, cat] = OUT_DESCS[Math.floor(Math.random() * OUT_DESCS.length)];
-        statements.push({
-          sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category) VALUES (?,?,?,?,?,?,?)`,
-          args: [userId, dateStr(year, month, day), desc, bankId, -roundVal((15 + Math.random() * 220) * fatorTeste), "saida", cat]
-        });
-      }
-    }
-  }
-  if (statements.length) await db.batch(statements, "write");
-}
-function dateStr(y, m, d) {
-  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
 
 /* ============================================================
    AUTENTICAÇÃO
@@ -205,20 +145,8 @@ function auth(req, res, next) {
 function publicUser(u) {
   return { id: u.id, name: u.name, email: u.email, avatar: u.avatar };
 }
-async function ensureDefaultsForUser(userId, { comDados = true } = {}) {
-  const connectedIds = comDados ? ["inter", "nubank"] : [];
-  for (const i of ALL_INSTITUTIONS) {
-    await run(
-      `INSERT OR IGNORE INTO institutions (user_id, bank_id, connected) VALUES (?,?,?)`,
-      [userId, i.id, connectedIds.includes(i.id) ? 1 : 0]
-    );
-  }
+async function ensureDefaultsForUser(userId) {
   await run(`INSERT OR IGNORE INTO preferences (user_id) VALUES (?)`, [userId]);
-  if (comDados) {
-    for (const bankId of connectedIds) {
-      await generateTransactionsForBank(userId, bankId, { months: 8 });
-    }
-  }
 }
 
 /* Wrapper pra rotas async não precisarem de try/catch repetido */
@@ -235,7 +163,7 @@ app.post("/api/auth/register", h(async (req, res) => {
   if (exists) return res.status(409).json({ error: "Já existe uma conta com esse e-mail" });
   const hash = bcrypt.hashSync(password, 10);
   const info = await run("INSERT INTO users (name, email, password_hash) VALUES (?,?,?)", [name, email, hash]);
-  await ensureDefaultsForUser(info.lastInsertRowid, { comDados: true });
+  await ensureDefaultsForUser(info.lastInsertRowid);
   const user = await get("SELECT * FROM users WHERE id = ?", [info.lastInsertRowid]);
   res.json({ token: makeToken(user), user: publicUser(user) });
 }));
@@ -263,7 +191,7 @@ app.post("/api/auth/google", h(async (req, res) => {
         "INSERT INTO users (name, email, google_id, avatar) VALUES (?,?,?,?)",
         [payload.name || "Usuário Google", payload.email, payload.sub, payload.picture || null]
       );
-      await ensureDefaultsForUser(info.lastInsertRowid, { comDados: true });
+      await ensureDefaultsForUser(info.lastInsertRowid);
       user = await get("SELECT * FROM users WHERE id = ?", [info.lastInsertRowid]);
     } else if (!user.google_id) {
       await run("UPDATE users SET google_id = ?, avatar = COALESCE(avatar, ?) WHERE id = ?", [payload.sub, payload.picture || null, user.id]);
@@ -295,38 +223,6 @@ app.put("/api/me/preferences", auth, h(async (req, res) => {
 }));
 
 /* ============================================================
-   INSTITUIÇÕES (BANCOS — modo demo)
-   ============================================================ */
-app.get("/api/institutions", auth, h(async (req, res) => {
-  const rows = await all("SELECT bank_id, connected, last_sync FROM institutions WHERE user_id = ?", [req.userId]);
-  const map = Object.fromEntries(rows.map(r => [r.bank_id, r]));
-  const result = ALL_INSTITUTIONS.map(i => ({
-    ...i,
-    connected: !!(map[i.id] && map[i.id].connected),
-    last_sync: map[i.id] ? map[i.id].last_sync : null
-  }));
-  res.json(result);
-}));
-
-app.post("/api/institutions/:bankId/toggle", auth, h(async (req, res) => {
-  const { bankId } = req.params;
-  const { modoTeste } = req.body || {};
-  if (!ALL_INSTITUTIONS.some(i => i.id === bankId)) return res.status(404).json({ error: "Banco não encontrado" });
-  const row = await get("SELECT * FROM institutions WHERE user_id = ? AND bank_id = ?", [req.userId, bankId]);
-  const newConnected = row ? !row.connected : true;
-  await run(
-    `INSERT INTO institutions (user_id, bank_id, connected, last_sync) VALUES (?,?,?,?)
-     ON CONFLICT(user_id, bank_id) DO UPDATE SET connected = excluded.connected, last_sync = excluded.last_sync`,
-    [req.userId, bankId, newConnected ? 1 : 0, newConnected ? new Date().toISOString() : row?.last_sync || null]
-  );
-  if (newConnected) {
-    const hasTx = await get("SELECT 1 FROM transactions WHERE user_id = ? AND bank_id = ? LIMIT 1", [req.userId, bankId]);
-    if (!hasTx) await generateTransactionsForBank(req.userId, bankId, { months: 6, modoTeste: !!modoTeste });
-  }
-  res.json({ connected: newConnected });
-}));
-
-/* ============================================================
    TRANSAÇÕES
    ============================================================ */
 app.get("/api/transactions", auth, h(async (req, res) => {
@@ -344,24 +240,6 @@ app.put("/api/transactions/:id/category", auth, h(async (req, res) => {
 app.delete("/api/transactions/:id", auth, h(async (req, res) => {
   const info = await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!info.changes) return res.status(404).json({ error: "Transação não encontrada" });
-  res.json({ ok: true });
-}));
-
-/* ---------- modo demonstração ---------- */
-app.post("/api/demo", auth, h(async (req, res) => {
-  const { modoTeste } = req.body || {};
-  await run("DELETE FROM transactions WHERE user_id = ?", [req.userId]);
-  const banks = ["inter", "nubank", "caixa", "bb"];
-  for (const i of ALL_INSTITUTIONS) {
-    await run(
-      `INSERT INTO institutions (user_id, bank_id, connected) VALUES (?,?,?)
-       ON CONFLICT(user_id, bank_id) DO UPDATE SET connected = excluded.connected`,
-      [req.userId, i.id, banks.includes(i.id) ? 1 : 0]
-    );
-  }
-  for (const bankId of banks) {
-    await generateTransactionsForBank(req.userId, bankId, { months: 8, modoTeste: !!modoTeste });
-  }
   res.json({ ok: true });
 }));
 
@@ -536,7 +414,17 @@ setInterval(syncAllPluggyItems, 5 * 60 * 1000);
 /* ============================================================
    START
    ============================================================ */
+// Apaga dados fictícios antigos (extratos e bancos de exemplo). Só mexe nos IDs de banco demo;
+// transações vindas do Pluggy (bank_id = item_id) e manuais não são tocadas.
+// Depois do primeiro deploy pode ser removida.
+async function removeDemoData() {
+  const ph = DEMO_BANK_IDS.map(() => "?").join(",");
+  await run(`DELETE FROM transactions WHERE bank_id IN (${ph})`, DEMO_BANK_IDS);
+  await run("DELETE FROM institutions");
+}
+
 initDb()
+  .then(removeDemoData)
   .then(() => {
     app.listen(PORT, () => console.log(`FinanApp backend rodando em http://localhost:${PORT}`));
   })
