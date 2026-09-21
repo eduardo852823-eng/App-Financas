@@ -62,7 +62,8 @@ const state = {
   user: null,
   preferences: { theme: "light", currency: "BRL" },
   transactions: [],
-  pluggyItems: []
+  pluggyItems: [],
+  accounts: []
 };
 
 async function refreshMe() {
@@ -71,13 +72,22 @@ async function refreshMe() {
   state.preferences = preferences;
   return user;
 }
-async function refreshTransactions() { state.transactions = await api("/transactions"); }
+// Cada transação passa a apontar para a CONTA (banco ou cartão) e não para a conexão MeuPluggy,
+// assim os filtros e gráficos diferenciam Banco Inter, Cartão, etc.
+async function refreshTransactions() {
+  const rows = await api("/transactions");
+  state.transactions = rows.map(t => ({ ...t, bank_id: t.account_id || t.bank_id }));
+}
+async function refreshAccounts() {
+  try { state.accounts = await api("/pluggy/accounts"); }
+  catch (e) { state.accounts = []; }
+}
 async function refreshPluggyItems() {
   try { state.pluggyItems = await api("/pluggy/items"); }
   catch (e) { state.pluggyItems = []; }
 }
 async function refreshAll() {
-  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems()]);
+  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts()]);
 }
 
 const PLUGGY_COLOR_PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#7C3AED", "#0891B2", "#DB2777"];
@@ -87,17 +97,31 @@ function pluggyColorFor(itemId) {
   return PLUGGY_COLOR_PALETTE[hash % PLUGGY_COLOR_PALETTE.length];
 }
 function isPluggyBank(bankId) {
-  return state.pluggyItems.some(p => p.item_id === bankId);
+  return state.accounts.some(a => a.account_id === bankId) || state.pluggyItems.some(p => p.item_id === bankId);
 }
-// Bancos conectados (Pluggy) no formato usado pelos filtros: { id, name, color }
+// "BANCO INTER" -> "Banco Inter"; cartão de crédito ganha o prefixo "Cartão"
+function prettyName(str) {
+  return (str || "").toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase());
+}
+function accountLabel(a) {
+  const n = prettyName(a.name) || "Conta";
+  return a.type === "CREDIT" ? `Cartão ${n}` : n;
+}
+// Contas (bancos e cartões) no formato usado pelos filtros: { id, name, color, type, balance }
 function connectedBanks() {
-  return state.pluggyItems.map(p => ({ id: p.item_id, name: p.institution_name || "Conta conectada", color: pluggyColorFor(p.item_id) }));
+  return state.accounts.map(a => ({
+    id: a.account_id, name: accountLabel(a), color: pluggyColorFor(a.account_id),
+    type: a.type, balance: a.balance, connected: true
+  }));
 }
 function instInfo(id) {
+  const acc = connectedBanks().find(b => b.id === id);
+  if (acc) return acc;
   const pluggy = state.pluggyItems.find(p => p.item_id === id);
   if (pluggy) return { id, name: pluggy.institution_name || "Conta conectada", color: pluggyColorFor(id), connected: true };
   return { name: id, color: "#94A3B8" };
 }
+function isCreditTx(t) { return t.account_type === "CREDIT"; }
 function effectiveCategory(t) { return t.category; }
 
 /* ============================================================
@@ -222,10 +246,19 @@ function monthLabel(ym) {
 
 function renderDashboard() {
   populateDashboardFilters();
-  const txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco });
+  let txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco });
+  // Cartão de crédito fica separado: em "Todos os bancos" os totais consideram só contas bancárias
+  // (senão o pagamento da fatura contaria duas vezes). Para ver o cartão, escolha-o no filtro.
+  if (dashFilterBanco === "all") txs = txs.filter(t => !isCreditTx(t));
   const entradas = txs.filter(t => t.type === "entrada").reduce((s,t) => s + t.value, 0);
   const saidas = txs.filter(t => t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
-  const saldo = entradas - saidas;
+
+  // Saldo = saldo real informado pelo banco (contas bancárias). Sem contas sincronizadas, usa entradas − saídas.
+  const banks = connectedBanks();
+  const saldoContas = banks.filter(b => b.type !== "CREDIT" && (dashFilterBanco === "all" || b.id === dashFilterBanco) && typeof b.balance === "number");
+  const escolhida = banks.find(b => b.id === dashFilterBanco);
+  const saldo = escolhida && escolhida.type === "CREDIT" ? entradas - saidas
+    : saldoContas.length ? saldoContas.reduce((s,b) => s + b.balance, 0) : entradas - saidas;
 
   document.getElementById("balance-total").textContent = fmtBRL(saldo);
   document.getElementById("total-entradas").textContent = fmtBRL(entradas);
@@ -234,16 +267,14 @@ function renderDashboard() {
 
   const allTx = state.transactions;
   const banksScroll = document.getElementById("banks-scroll");
-  const bankIdsWithTx = [...new Set(allTx.map(t => t.bank_id))];
-  const banksToShow = bankIdsWithTx
-    .map(id => instInfo(id))
-    .filter(i => i && i.name);
-  banksScroll.innerHTML = banksToShow.map(i => {
-    const bal = allTx.filter(t => t.bank_id === i.id).reduce((s,t) => s + t.value, 0);
+  banksScroll.innerHTML = banks.map(i => {
+    const isCard = i.type === "CREDIT";
+    const bankTx = allTx.filter(t => t.bank_id === i.id);
+    const val = isCard ? -bankTx.reduce((s,t) => s + t.value, 0) : (typeof i.balance === "number" ? i.balance : bankTx.reduce((s,t) => s + t.value, 0));
     return `<div class="bank-chip">
       <div class="bank-icon" style="background:${i.color}">${initials(i.name)}</div>
-      <div class="bank-amount">${fmtBRL(bal)}</div>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${i.name}</div>
+      <div class="bank-amount">${fmtBRL(val)}</div>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${i.name}${isCard ? " · gastos" : ""}</div>
     </div>`;
   }).join("") || `<div class="empty-state">Nenhum banco conectado ainda.</div>`;
 
@@ -760,7 +791,7 @@ async function startPluggyConnect() {
             }
           });
           await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
-          await Promise.all([refreshPluggyItems(), refreshTransactions()]);
+          await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
           renderScreen(currentScreen);
         } catch (e) {
           alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
@@ -780,7 +811,7 @@ async function startPluggyConnect() {
 async function syncPluggyItem(itemId) {
   try {
     const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
-    await refreshTransactions();
+    await Promise.all([refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
     let msg = `Sincronizado! ${r.novas ?? 0} transações novas salvas.\n\n`;
     if (r.item) msg += `Conexão: ${r.item.status || "?"}${r.item.executionStatus ? " / " + r.item.executionStatus : ""}\n`;
@@ -795,10 +826,10 @@ async function syncPluggyItem(itemId) {
 }
 
 async function removePluggyItem(id) {
-  if (!confirm("Remover esta conexão bancária?")) return;
+  if (!confirm("Remover esta conexão? As transações dela também serão apagadas do app.")) return;
   try {
     await api(`/pluggy/items/${id}`, { method: "DELETE" });
-    await Promise.all([refreshPluggyItems(), refreshTransactions()]);
+    await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
   } catch (e) {
     alert("Erro ao remover: " + e.message);

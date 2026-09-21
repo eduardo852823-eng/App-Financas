@@ -98,7 +98,22 @@ CREATE TABLE IF NOT EXISTS pluggy_items (
   created_at TEXT DEFAULT (datetime('now')),
   last_sync TEXT
 );
+
+CREATE TABLE IF NOT EXISTS pluggy_accounts (
+  account_id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  item_id TEXT NOT NULL,
+  name TEXT,
+  type TEXT,
+  balance REAL,
+  updated_at TEXT
+);
 `);
+  // colunas novas em transactions (ignora o erro se já existirem)
+  for (const col of ["external_id TEXT", "account_id TEXT", "account_name TEXT", "account_type TEXT"]) {
+    try { await db.execute(`ALTER TABLE transactions ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
+  }
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_external ON transactions(user_id, external_id)");
 }
 
 /* ============================================================
@@ -317,14 +332,16 @@ app.post("/api/pluggy/items", auth, h(async (req, res) => {
   );
 
   // Evita duplicar: se já existia uma conexão do mesmo CPF + mesma instituição,
-  // as transações antigas passam para a conexão nova e a antiga é removida.
+  // a antiga é removida (a nova sincroniza o histórico completo).
   if (institutionName) {
     const dups = await all(
       "SELECT * FROM pluggy_items WHERE user_id = ? AND cpf = ? AND institution_name = ? AND item_id != ?",
       [req.userId, cpf, institutionName, itemId]
     );
     for (const dup of dups) {
-      await run("UPDATE transactions SET bank_id = ? WHERE user_id = ? AND bank_id = ?", [itemId, req.userId, dup.item_id]);
+      // a conexão nova traz o histórico completo de novo, então o que veio da antiga é descartado
+      await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, dup.item_id]);
+      await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [dup.item_id]);
       await run("DELETE FROM pluggy_items WHERE id = ?", [dup.id]);
       try {
         const apiKey = await getPluggyApiKey();
@@ -346,6 +363,12 @@ app.get("/api/pluggy/items", auth, h(async (req, res) => {
   res.json(rows);
 }));
 
+// Contas (banco / cartão) de todas as conexões do usuário, com o saldo real informado pelo Pluggy.
+app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
+  const rows = await all("SELECT account_id, item_id, name, type, balance FROM pluggy_accounts WHERE user_id = ?", [req.userId]);
+  res.json(rows);
+}));
+
 // Desconecta um item (remove do nosso banco e deleta no Pluggy).
 app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
@@ -359,11 +382,70 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   } catch (e) {
     console.error("Erro ao deletar item no Pluggy (seguindo mesmo assim):", e.message);
   }
+  await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, item.item_id]);
+  await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [item.item_id]);
   await run("DELETE FROM pluggy_items WHERE id = ?", [item.id]);
   res.json({ ok: true });
 }));
 
-// Puxa contas + transações reais de um item do Pluggy e grava na tabela transactions.
+// Sincroniza um item do Pluggy: grava as contas (com saldo real) e as transações de cada conta.
+async function syncPluggyItemData(item, headers) {
+  const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers });
+  if (!accResp.ok) throw new Error(`Falha ao buscar contas no Pluggy (HTTP ${accResp.status})`);
+  const { results: accounts } = await accResp.json();
+
+  const contas = [];
+  const txStatements = [];
+  let allOk = true;
+  let transacoesProcessadas = 0;
+  for (const acc of accounts) {
+    let pluggyTx;
+    try {
+      pluggyTx = await fetchAllPluggyTransactions(acc.id, headers);
+    } catch (e) {
+      allOk = false;
+      contas.push({ nome: acc.name, tipo: acc.type, transacoes: 0, erro: e.message });
+      continue;
+    }
+    contas.push({ nome: acc.name, tipo: acc.type, transacoes: pluggyTx.length });
+    for (const t of pluggyTx) {
+      const desc = t.description || "Transação";
+      const value = pluggyValue(t.amount, acc.type);
+      const date = (t.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+      txStatements.push({
+        sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category, external_id, account_id, account_name, account_type)
+              SELECT ?,?,?,?,?,?,?,?,?,?,?
+              WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND external_id = ?)`,
+        args: [
+          item.user_id, date, desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
+          t.id, acc.id, acc.name || null, acc.type || null,
+          item.user_id, t.id
+        ]
+      });
+      transacoesProcessadas++;
+    }
+  }
+
+  const statements = accounts.map(acc => ({
+    sql: `INSERT INTO pluggy_accounts (account_id, user_id, item_id, name, type, balance, updated_at)
+          VALUES (?,?,?,?,?,?, datetime('now'))
+          ON CONFLICT(account_id) DO UPDATE SET name = excluded.name, type = excluded.type, balance = excluded.balance, updated_at = excluded.updated_at`,
+    args: [acc.id, item.user_id, item.item_id, acc.name || null, acc.type || null, typeof acc.balance === "number" ? acc.balance : null]
+  }));
+  // Só uma vez: apaga as transações antigas dessa conexão que foram salvas antes de existir o vínculo com a conta
+  if (allOk) {
+    statements.push({ sql: "DELETE FROM transactions WHERE user_id = ? AND bank_id = ? AND external_id IS NULL", args: [item.user_id, item.item_id] });
+  }
+  const offset = statements.length;
+  statements.push(...txStatements);
+
+  const results = await db.batch(statements, "write");
+  const novas = results.slice(offset).reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
+  await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
+  return { accounts, contas, transacoesProcessadas, novas };
+}
+
+// Sincroniza um item sob demanda (botão "Sincronizar").
 // Devolve também um diagnóstico (status da conexão, contas e nº de transações por conta).
 app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE item_id = ? AND user_id = ?", [req.params.itemId, req.userId]);
@@ -372,58 +454,24 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const apiKey = await getPluggyApiKey();
   const headers = { "X-API-KEY": apiKey };
 
-  // status da conexão no Pluggy
   let itemInfo = null;
   try {
     const r = await fetch(`${PLUGGY_BASE_URL}/items/${item.item_id}`, { headers });
     if (r.ok) itemInfo = await r.json();
   } catch (e) { /* segue sem o status */ }
 
-  const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers });
-  if (!accResp.ok) return res.status(502).json({ error: `Falha ao buscar contas no Pluggy (HTTP ${accResp.status})` });
-  const { results: accounts } = await accResp.json();
-
-  const contas = [];
-  const statements = [];
-  let transacoesProcessadas = 0;
-  for (const acc of accounts) {
-    let pluggyTx;
-    try {
-      pluggyTx = await fetchAllPluggyTransactions(acc.id, headers);
-    } catch (e) {
-      contas.push({ nome: acc.name, tipo: acc.type, transacoes: 0, erro: e.message });
-      continue;
-    }
-    contas.push({ nome: acc.name, tipo: acc.type, transacoes: pluggyTx.length });
-    for (const t of pluggyTx) {
-      const desc = t.description || "Transação";
-      const value = pluggyValue(t.amount, acc.type);
-      statements.push({
-        sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category)
-              SELECT ?,?,?,?,?,?,?
-              WHERE NOT EXISTS (
-                SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND desc = ? AND value = ?
-              )`,
-        args: [
-          req.userId, t.date?.slice(0, 10), desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
-          req.userId, t.date?.slice(0, 10), desc, value
-        ]
-      });
-      transacoesProcessadas++;
-    }
+  let result;
+  try {
+    result = await syncPluggyItemData(item, headers);
+  } catch (e) {
+    return res.status(502).json({ error: e.message });
   }
-  let novas = 0;
-  if (statements.length) {
-    const results = await db.batch(statements, "write");
-    novas = results.reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
-  }
-  await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
   res.json({
     ok: true,
-    contasEncontradas: accounts.length,
-    transacoesProcessadas,
-    novas,
-    contas,
+    contasEncontradas: result.accounts.length,
+    transacoesProcessadas: result.transacoesProcessadas,
+    novas: result.novas,
+    contas: result.contas,
     item: itemInfo ? {
       status: itemInfo.status,
       executionStatus: itemInfo.executionStatus,
@@ -444,36 +492,7 @@ async function syncAllPluggyItems() {
     for (const item of items) {
       try {
         const apiKey = await getPluggyApiKey();
-        const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers: { "X-API-KEY": apiKey } });
-        if (!accResp.ok) continue;
-        const { results: accounts } = await accResp.json();
-        const statements = [];
-        for (const acc of accounts) {
-          let pluggyTx;
-          try {
-            pluggyTx = await fetchAllPluggyTransactions(acc.id, { "X-API-KEY": apiKey });
-          } catch (e) {
-            console.error(`[pluggy-sync] transações da conta ${acc.id} falharam:`, e.message);
-            continue;
-          }
-          for (const t of pluggyTx) {
-            const desc = t.description || "Transação";
-            const value = pluggyValue(t.amount, acc.type);
-            statements.push({
-              sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category)
-                    SELECT ?,?,?,?,?,?,?
-                    WHERE NOT EXISTS (
-                      SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND desc = ? AND value = ?
-                    )`,
-              args: [
-                item.user_id, t.date?.slice(0, 10), desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
-                item.user_id, t.date?.slice(0, 10), desc, value
-              ]
-            });
-          }
-        }
-        if (statements.length) await db.batch(statements, "write");
-        await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
+        await syncPluggyItemData(item, { "X-API-KEY": apiKey });
       } catch (e) {
         console.error(`[pluggy-sync] erro no item ${item.item_id}:`, e.message);
       }
