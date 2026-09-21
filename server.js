@@ -294,6 +294,25 @@ app.post("/api/pluggy/items", auth, h(async (req, res) => {
      ON CONFLICT(item_id) DO UPDATE SET status = 'UPDATED', last_sync = datetime('now')`,
     [req.userId, cpf, itemId, institutionName || null]
   );
+
+  // Evita duplicar: se já existia uma conexão do mesmo CPF + mesma instituição,
+  // as transações antigas passam para a conexão nova e a antiga é removida.
+  if (institutionName) {
+    const dups = await all(
+      "SELECT * FROM pluggy_items WHERE user_id = ? AND cpf = ? AND institution_name = ? AND item_id != ?",
+      [req.userId, cpf, institutionName, itemId]
+    );
+    for (const dup of dups) {
+      await run("UPDATE transactions SET bank_id = ? WHERE user_id = ? AND bank_id = ?", [itemId, req.userId, dup.item_id]);
+      await run("DELETE FROM pluggy_items WHERE id = ?", [dup.id]);
+      try {
+        const apiKey = await getPluggyApiKey();
+        await fetch(`${PLUGGY_BASE_URL}/items/${dup.item_id}`, { method: "DELETE", headers: { "X-API-KEY": apiKey } });
+      } catch (e) {
+        console.error("Erro ao deletar item duplicado no Pluggy (seguindo mesmo assim):", e.message);
+      }
+    }
+  }
   res.json({ ok: true });
 }));
 
@@ -324,25 +343,36 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
 }));
 
 // Puxa contas + transações reais de um item do Pluggy e grava na tabela transactions.
+// Devolve também um diagnóstico (status da conexão, contas e nº de transações por conta).
 app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE item_id = ? AND user_id = ?", [req.params.itemId, req.userId]);
   if (!item) return res.status(404).json({ error: "Conexão não encontrada" });
 
   const apiKey = await getPluggyApiKey();
-  const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, {
-    headers: { "X-API-KEY": apiKey },
-  });
-  if (!accResp.ok) return res.status(502).json({ error: "Falha ao buscar contas no Pluggy" });
+  const headers = { "X-API-KEY": apiKey };
+
+  // status da conexão no Pluggy
+  let itemInfo = null;
+  try {
+    const r = await fetch(`${PLUGGY_BASE_URL}/items/${item.item_id}`, { headers });
+    if (r.ok) itemInfo = await r.json();
+  } catch (e) { /* segue sem o status */ }
+
+  const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers });
+  if (!accResp.ok) return res.status(502).json({ error: `Falha ao buscar contas no Pluggy (HTTP ${accResp.status})` });
   const { results: accounts } = await accResp.json();
 
-  let novasTransacoes = 0;
+  const contas = [];
   const statements = [];
+  let transacoesProcessadas = 0;
   for (const acc of accounts) {
-    const txResp = await fetch(`${PLUGGY_BASE_URL}/transactions?accountId=${acc.id}&pageSize=500`, {
-      headers: { "X-API-KEY": apiKey },
-    });
-    if (!txResp.ok) continue;
+    const txResp = await fetch(`${PLUGGY_BASE_URL}/transactions?accountId=${acc.id}&pageSize=500`, { headers });
+    if (!txResp.ok) {
+      contas.push({ nome: acc.name, tipo: acc.type, transacoes: 0, erro: `HTTP ${txResp.status}` });
+      continue;
+    }
     const { results: pluggyTx } = await txResp.json();
+    contas.push({ nome: acc.name, tipo: acc.type, transacoes: pluggyTx.length });
     for (const t of pluggyTx) {
       const desc = t.description || "Transação";
       statements.push({
@@ -356,12 +386,28 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
           req.userId, t.date?.slice(0, 10), desc, t.amount
         ]
       });
-      novasTransacoes++;
+      transacoesProcessadas++;
     }
   }
-  if (statements.length) await db.batch(statements, "write");
+  let novas = 0;
+  if (statements.length) {
+    const results = await db.batch(statements, "write");
+    novas = results.reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
+  }
   await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
-  res.json({ ok: true, contasEncontradas: accounts.length, transacoesProcessadas: novasTransacoes });
+  res.json({
+    ok: true,
+    contasEncontradas: accounts.length,
+    transacoesProcessadas,
+    novas,
+    contas,
+    item: itemInfo ? {
+      status: itemInfo.status,
+      executionStatus: itemInfo.executionStatus,
+      conector: itemInfo.connector?.name,
+      erro: itemInfo.error?.message || null
+    } : null
+  });
 }));
 
 /* ============================================================

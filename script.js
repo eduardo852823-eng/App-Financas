@@ -782,7 +782,13 @@ async function syncPluggyItem(itemId) {
     const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
     await refreshTransactions();
     renderScreen(currentScreen);
-    alert(`Sincronizado! ${r.transacoesProcessadas} transações verificadas.`);
+    let msg = `Sincronizado! ${r.novas ?? 0} transações novas salvas.\n\n`;
+    if (r.item) msg += `Conexão: ${r.item.status || "?"}${r.item.executionStatus ? " / " + r.item.executionStatus : ""}\n`;
+    msg += `Contas encontradas: ${r.contasEncontradas}\n`;
+    (r.contas || []).forEach(c => { msg += `• ${c.nome || "Conta"} (${c.tipo || "?"}): ${c.transacoes} transações${c.erro ? " — erro " + c.erro : ""}\n`; });
+    if (r.item?.erro) msg += `\nErro do Pluggy: ${r.item.erro}`;
+    if (!r.contasEncontradas) msg += `\nO Pluggy não devolveu nenhuma conta para essa conexão.`;
+    alert(msg);
   } catch (e) {
     alert("Erro ao sincronizar: " + e.message);
   }
