@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS transactions (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS category_rules (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  category TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS merchant_cache (
+  key TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS pluggy_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -115,6 +128,15 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
   for (const col of ["external_id TEXT", "account_id TEXT", "account_name TEXT", "account_type TEXT"]) {
     try { await db.execute(`ALTER TABLE transactions ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
   }
+  // colunas novas: categoria escolhida manualmente (a IA nunca sobrescreve), categoria original do Pluggy e último acesso do usuário
+  for (const stmt of [
+    "ALTER TABLE transactions ADD COLUMN category_manual INTEGER DEFAULT 0",
+    "ALTER TABLE transactions ADD COLUMN pluggy_category TEXT",
+    "ALTER TABLE transactions ADD COLUMN category_source TEXT",
+    "ALTER TABLE users ADD COLUMN last_seen_at TEXT",
+  ]) {
+    try { await db.execute(stmt); } catch (e) { /* já existe */ }
+  }
   // colunas novas em pluggy_accounts (dados completos da conta e faturas do cartão)
   for (const col of ["data TEXT", "bills TEXT"]) {
     try { await db.execute(`ALTER TABLE pluggy_accounts ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
@@ -128,20 +150,399 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
 // IDs dos bancos fictícios antigos (usados só para limpar dados de exemplo que ficaram salvos)
 const DEMO_BANK_IDS = ["inter", "bb", "caixa", "nubank", "itau", "bradesco", "santander", "brb", "c6", "btg", "mp", "sicoob", "sicredi"];
 
-const CATEGORY_RULES = [
-  { match: ["ifood", "restaurante", "mercado", "supermercado", "padaria"], cat: "alimentacao" },
-  { match: ["uber", "99", "posto", "combustivel", "combustível"], cat: "transporte" },
-  { match: ["netflix", "steam", "spotify", "disney", "hbo", "prime video"], cat: "entretenimento" },
-  { match: ["farmacia", "farmácia", "drogaria", "hospital", "clinica", "clínica"], cat: "saude" },
-  { match: ["luz", "agua", "água", "internet", "telefone", "condominio", "condomínio", "energia"], cat: "contas" },
-  { match: ["escola", "curso", "faculdade", "udemy"], cat: "educacao" },
-  { match: ["salario", "salário", "pix recebido", "pagamento recebido"], cat: "salario" },
-  { match: ["amazon", "shopee", "magazine", "loja"], cat: "compras" }
+/* ============================================================
+   CATEGORIZADOR AUTOMÁTICO ("IA" das transações)
+
+   Ordem de decisão (a primeira que acertar vence):
+   1. Regras aprendidas do usuário (quando ele corrige uma categoria)
+   2. Palavras-chave de estabelecimentos/serviços brasileiros
+   3. Casamento aproximado (nome truncado pelo banco / erro de digitação)
+   4. Categoria que o próprio Pluggy/banco mandou junto da transação
+   5. Modelo estatístico treinado com o histórico DO PRÓPRIO usuário
+   6. Claude (opcional, só se ANTHROPIC_API_KEY estiver configurada)
+   7. "nao_identificada"
+
+   Match de palavras-chave: texto e palavras normalizados (sem acento, minúsculo,
+   sem símbolos). Palavra com 5+ letras casa pelo INÍCIO de qualquer palavra do
+   texto; até 4 letras (ou terminada em "$") só casa a palavra inteira.
+   ============================================================ */
+function normalize(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Regras de "exceção": vencem todas as outras (ex.: "amazon prime" é streaming, não compra)
+const PRE_RULES = [
+  { cat: "entretenimento", kws: ["amazon prime", "prime video", "primevideo", "amazon music", "amazon kindle"] },
+  { cat: "alimentacao", kws: ["uber eats", "ubereats", "99 food", "99food", "rappi", "ifood"] },
+  { cat: "compras", kws: ["mercado livre", "mercadolivre", "mercado pago", "mercadopago"] },
+  { cat: "fatura", kws: ["pagamento de fatura", "pagamento fatura", "pag fatura", "pgto fatura", "fatura cartao", "fatura paga", "pagamento recebido"] },
 ];
-function categorize(desc) {
-  const d = desc.toLowerCase();
-  for (const rule of CATEGORY_RULES) if (rule.match.some(k => d.includes(k))) return rule.cat;
-  return "nao_identificada";
+
+// Ordem importa: do mais específico para o mais genérico
+const RULES = [
+  { cat: "alimentacao", kws: [
+    "restaurante", "lanchonete", "lanche", "pizza", "hamburgueria", "hamburguer", "churrascaria", "churrasco", "padaria", "panificadora",
+    "confeitaria", "sorveteria", "acaiteria", "acai", "cafeteria", "cafe", "bar", "boteco", "choperia", "cervejaria", "adega", "pastelaria",
+    "pastel", "sushi", "japones", "marmita", "marmitaria", "self service", "rotisseria", "doceria", "chocolate", "bomboniere",
+    "mcdonalds", "mc donalds", "burger king", "bk brasil", "subway", "outback", "habibs", "giraffas", "spoleto", "starbucks", "madero",
+    "coco bambu", "bobs", "dominos", "pizza hut", "kfc", "china in box", "cacau show", "kopenhagen", "ragazzo", "vivenda do camarao",
+    "supermercado", "hipermercado", "mercado", "mercadinho", "mercearia", "hortifruti", "sacolao", "acougue", "emporio", "quitanda",
+    "atacadao", "assai", "atacarejo", "carrefour", "pao de acucar", "walmart", "sams club", "makro", "comper", "bretas", "supernosso",
+    "guanabara", "zaffari", "tatico", "atakarejo", "condor", "angeloni", "prezunic", "super adega", "oba hortifruti", "dom atacadista",
+    "epa", "savegnago", "cooper", "giassi", "fort atacadista", "verdemar", "extrabom", "hirota", "st marche", "mambo", "sonda",
+  ] },
+  { cat: "transporte", kws: [
+    "uber", "99", "99app", "99pop", "99 pop", "99 taxi", "cabify", "indriver", "taxi", "moto taxi", "mototaxi",
+    "posto", "shell", "ipiranga", "petrobras", "texaco", "combustivel", "gasolina", "etanol", "diesel", "gnv", "abastecimento",
+    "estacionamento", "parquimetro", "zona azul", "estapar", "sem parar", "semparar", "conectcar", "veloe", "pedagio", "autopass",
+    "metro$", "cptm", "bilhete unico", "sptrans", "riocard", "dftrans", "onibus", "brt", "trem",
+    "detran", "lava jato", "lava rapido", "oficina", "mecanica", "autopecas", "auto pecas", "pneu", "borracharia", "funilaria",
+    "patinete", "tembici", "bike itau",
+  ] },
+  { cat: "entretenimento", kws: [
+    "netflix", "spotify", "disney", "hbo", "hbo max", "youtube", "globoplay", "deezer", "crunchyroll", "paramount", "telecine",
+    "apple tv", "apple music", "twitch", "steam", "steampowered", "playstation", "psn", "xbox", "nintendo", "epic games", "riot games", "blizzard",
+    "cinema", "cinemark", "kinoplex", "uci", "ingresso", "sympla", "eventim", "ticketmaster", "teatro", "parque", "boliche", "karaoke",
+    "tinder", "bumble", "clube", "balada", "show",
+  ] },
+  { cat: "saude", kws: [
+    "farmacia", "farmacias", "drogaria", "drogasil", "droga raia", "drogaraia", "raia", "pacheco", "pague menos", "paguemenos", "ultrafarma", "panvel",
+    "hospital", "clinica", "laboratorio", "exame", "consulta", "dentista", "odonto", "medico", "fisioterapia", "nutricionista", "psicolog",
+    "otica", "unimed", "amil", "sulamerica", "hapvida", "notredame", "plano de saude", "saude",
+    "academia", "smart fit", "smartfit", "bluefit", "bodytech", "selfit", "gympass", "wellhub", "totalpass", "crossfit",
+  ] },
+  { cat: "educacao", kws: [
+    "escola", "colegio", "curso", "faculdade", "universidade", "udemy", "alura", "coursera", "duolingo", "mensalidade escolar",
+    "matricula", "kumon", "cultura inglesa", "ccaa", "wizard", "fisk", "yazigi", "descomplica", "estacio", "unip", "uniceub", "papelaria",
+  ] },
+  { cat: "viagens", kws: [
+    "airbnb", "booking", "decolar", "latam", "gol linhas", "azul linhas", "voegol", "voeazul", "cvc", "hurb", "123milhas", "maxmilhas",
+    "hotel", "pousada", "hostel", "resort", "rodoviaria", "clickbus", "buser", "localiza", "movida", "unidas", "expedia", "trivago", "passagem", "aeroporto",
+  ] },
+  { cat: "outros", kws: ["petz", "cobasi", "petlove", "petshop", "pet shop", "veterinari"] },
+  { cat: "compras", kws: [
+    "amazon", "amzn", "shopee", "magazine luiza", "magalu", "americanas", "submarino", "shein", "aliexpress", "alibaba", "temu",
+    "casas bahia", "ponto frio", "fast shop", "kabum", "pichau", "terabyte", "leroy merlin", "telhanorte", "tok stok", "tokstok", "ikea", "havan$",
+    "renner", "riachuelo", "zara", "hering", "centauro", "decathlon", "netshoes", "dafiti", "zattini", "nike", "adidas", "arezzo",
+    "sephora", "boticario", "natura$", "avon", "kalunga", "livraria", "saraiva", "pernambucanas", "vestuario", "calcados", "perfumaria", "eletronicos",
+  ] },
+  { cat: "contas", kws: [
+    "luz", "energia", "enel", "cemig", "cpfl", "neoenergia", "equatorial", "celpe", "coelba", "energisa", "light servicos",
+    "agua", "esgoto", "caesb", "sabesp", "copasa", "sanepar", "cedae", "embasa", "compesa", "saneago",
+    "gas", "comgas", "naturgy", "ultragaz", "liquigas", "supergasbras",
+    "internet", "vivo", "claro", "claro net", "oi fibra", "oi movel", "tim s a", "tim celular", "tim brasil", "brisanet", "algar", "telefone", "celular", "fibra", "telefonica",
+    "condominio", "aluguel", "imobiliaria", "seguro", "porto seguro",
+  ] },
+  { cat: "taxas", kws: [
+    "tarifa", "iof$", "anuidade", "juros", "encargos", "multa", "imposto", "iptu", "ipva", "darf$", "das$", "gru$", "receita federal",
+    "inss$", "cartorio", "custas", "taxa$", "taxas",
+  ] },
+  { cat: "investimentos", kws: [
+    "aplicacao", "resgate", "cdb", "lci", "lca", "tesouro", "rendimento", "dividendo", "renda fixa", "renda variavel", "fundo de investimento",
+    "xp investimentos", "nuinvest", "clear corretora", "rico investimentos", "binance", "mercado bitcoin", "cofrinho", "caixinha", "porquinho",
+    "poupanca", "b3$", "fii$",
+  ] },
+  { cat: "salario", kws: [
+    "salario", "folha de pagamento", "folha pagamento", "proventos", "decimo terceiro", "13o salario", "ferias",
+  ] },
+  // genéricos: só entram se nada mais específico casou
+  { cat: "compras", kws: ["loja", "lojas", "magazine", "shopping", "store", "outlet"] },
+  { cat: "transferencias", kws: ["pix", "ted$", "doc$", "transferencia", "transf", "transferido"] },
+];
+
+/* ---------- compilação das palavras-chave ---------- */
+function compile(groups) {
+  return groups.map(g => ({
+    cat: g.cat,
+    tests: g.kws.map(raw => {
+      const exact = raw.endsWith("$");
+      const kw = normalize(exact ? raw.slice(0, -1) : raw);
+      const prefixOk = !exact && kw.length >= 5;
+      return { kw, needle: prefixOk ? " " + kw : " " + kw + " " };
+    }),
+  }));
+}
+const COMPILED_PRE = compile(PRE_RULES);
+const COMPILED = compile(RULES);
+
+function matchGroups(padded, groups) {
+  for (const g of groups) {
+    for (const t of g.tests) if (padded.includes(t.needle)) return g.cat;
+  }
+  return null;
+}
+
+/* ---------- categoria que o Pluggy já manda (fallback) ---------- */
+function mapPluggyCategory(name) {
+  const c = normalize(name);
+  if (!c || c === "uncategorized" || c === "others" || c === "other") return null;
+  const has = (...words) => words.some(w => c.includes(w));
+  if (has("credit card payment", "card payment", "bill payment")) return "fatura";
+  if (/\b(tax|taxes|fee|fees|iof|fine|fines|penalty|penalties)\b/.test(c) || has("interest charged")) return "taxas";
+  if (has("invest", "fixed income", "variable income", "stock", "dividend", "savings", "retirement", "pension", "crypto")) return "investimentos";
+  if (has("salary", "income", "payroll", "wage", "proceeds")) return "salario";
+  if (has("food delivery", "eating out", "restaurant", "grocer", "supermarket", "bakery", "food and drink", "food", "bar ")) return "alimentacao";
+  if (has("taxi", "ride", "transport", "fuel", "gas station", "parking", "toll", "vehicle", "car ", "automotive")) return "transporte";
+  if (has("stream", "entertainment", "gaming", "game", "cinema", "leisure", "music", "video", "event")) return "entretenimento";
+  if (has("health", "pharmac", "drugstore", "doctor", "dental", "hospital", "gym", "fitness", "wellness")) return "saude";
+  if (has("education", "school", "universit", "course", "tuition")) return "educacao";
+  if (has("travel", "airline", "aviation", "accom", "hotel", "lodging")) return "viagens";
+  if (has("utilit", "electric", "water", "telecom", "internet", "mobile", "phone", "rent", "housing", "insurance", "gas")) return "contas";
+  if (has("shopping", "clothing", "electronic", "retail", "store", "department", "online shopping")) return "compras";
+  if (has("transfer", "pix")) return "transferencias";
+  return null;
+}
+
+/* ---------- chave do estabelecimento (para aprender com as correções) ----------
+   "Compra no débito: PADARIA DO ZE 1234 15/09"  ->  "padaria do ze"
+   "Pix enviado: Maria da Silva"                 ->  "maria da silva"                  */
+const NOISE_PHRASES = [
+  "transferencia enviada pelo pix", "transferencia recebida pelo pix", "transferencia enviada", "transferencia recebida",
+  "compra no debito", "compra no credito", "compra com cartao", "compra debito", "compra credito", "compra",
+  "pix enviado", "pix recebido", "pix", "pagamento de", "pagamento", "pgto", "debito", "credito", "parcela", "ted", "doc",
+];
+function merchantKey(desc) {
+  let s = " " + normalize(desc) + " ";
+  for (const p of NOISE_PHRASES) s = s.split(" " + p + " ").join(" ");
+  const tokens = s.split(" ").filter(t => t.length > 1 && !/\d/.test(t));
+  const key = tokens.slice(0, 3).join(" ");
+  return key.length >= 3 ? key : "";
+}
+
+
+/* ---------- é Pix/TED/transferência? (nome de pessoa: não adianta casar por semelhança) ---------- */
+function isPersonalTransfer(desc) {
+  return /\b(pix|ted|doc|transf\w*)\b/.test(normalize(desc));
+}
+
+/* ---------- casamento aproximado ----------
+   pega "SUPERMERC SAO JOAO" (banco cortou o nome) e "RESTAURNTE" (erro de digitação) */
+function lev1(a, b) { // true se a distância de edição é no máximo 1
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (la > lb) i++; else if (lb > la) j++; else { i++; j++; }
+  }
+  return edits + (la - i) + (lb - j) <= 1;
+}
+const FUZZY_WORDS = [];
+for (const g of RULES) {
+  for (const raw of g.kws) {
+    const kw = normalize(raw.endsWith("$") ? raw.slice(0, -1) : raw);
+    if (kw.length >= 6 && !kw.includes(" ")) FUZZY_WORDS.push({ cat: g.cat, kw });
+  }
+}
+function fuzzyMatch(norm) {
+  const tokens = norm.split(" ").filter(t => t.length >= 5 && !/\d/.test(t));
+  if (!tokens.length) return null;
+  for (const { cat, kw } of FUZZY_WORDS) {
+    for (const t of tokens) {
+      if (t.length < kw.length && kw.startsWith(t)) return cat;      // nome cortado
+      if (t.length >= 7 && kw.length >= 7 && lev1(t, kw)) return cat; // 1 letra errada/faltando
+    }
+  }
+  return null;
+}
+
+/* ---------- modelo estatístico (Naive Bayes) treinado com o histórico do usuário ----------
+   Aprende quais palavras aparecem em cada categoria. Correções manuais pesam 3x.
+   Só chuta quando tem muita certeza (>= 85%) e evidência suficiente.               */
+const MODEL_STOP = new Set(["pix", "enviado", "recebido", "enviada", "recebida", "compra", "debito", "credito", "pagamento", "pgto", "transferencia",
+  "transf", "ted", "doc", "ltda", "com", "cartao", "parcela", "www", "loja", "lojas", "filial", "matriz", "comercio", "servicos", "eireli", "the", "and"]);
+function modelTokens(desc) {
+  return [...new Set(normalize(desc).split(" ").filter(t => t.length >= 3 && !/\d/.test(t) && !MODEL_STOP.has(t)))];
+}
+function buildModel(rows) { // rows: [{ desc, category, manual }]
+  const tokenCat = new Map(), catTotal = new Map();
+  for (const r of rows) {
+    if (!r.category || r.category === "nao_identificada") continue;
+    const w = r.manual ? 3 : 1;
+    for (const t of modelTokens(r.desc)) {
+      let m = tokenCat.get(t);
+      if (!m) { m = new Map(); tokenCat.set(t, m); }
+      m.set(r.category, (m.get(r.category) || 0) + w);
+      catTotal.set(r.category, (catTotal.get(r.category) || 0) + w);
+    }
+  }
+  return { tokenCat, catTotal, V: tokenCat.size };
+}
+function predictModel(model, desc, minPosterior = 0.85) {
+  if (!model || !model.V) return null;
+  const toks = modelTokens(desc).filter(t => model.tokenCat.has(t));
+  if (!toks.length) return null;
+  const cats = [...model.catTotal.keys()];
+  const logs = cats.map(c => {
+    let l = 0;
+    for (const t of toks) l += Math.log(((model.tokenCat.get(t).get(c) || 0) + 0.1) / (model.catTotal.get(c) + 0.1 * model.V));
+    return l;
+  });
+  const mx = Math.max(...logs);
+  const exps = logs.map(l => Math.exp(l - mx));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  let bi = 0;
+  exps.forEach((e, i) => { if (e > exps[bi]) bi = i; });
+  const best = cats[bi];
+  const support = toks.reduce((s, t) => s + (model.tokenCat.get(t).get(best) || 0), 0);
+  return exps[bi] / sum >= minPosterior && support >= 2 ? best : null;
+}
+
+/* ---------- função principal ----------
+   opts.pluggy  -> objeto original da transação no Pluggy (category, merchant, descriptionRaw…)
+   opts.learned -> Map(chave -> categoria) com as correções do usuário
+   opts.model   -> modelo do usuário (buildModel)
+   opts.cache   -> Map(chave -> categoria) respondida pelo Claude
+   Devolve { cat, source } — source: learned | rule | pluggy | model | llm | null           */
+function categorizeFull(desc, opts = {}) {
+  const { pluggy, learned, model, cache } = opts;
+  if (learned && learned.size) {
+    const c = learned.get(merchantKey(desc));
+    if (c) return { cat: c, source: "learned" };
+  }
+  const extra = pluggy ? [pluggy.descriptionRaw, pluggy.merchant && pluggy.merchant.name, pluggy.merchant && pluggy.merchant.businessName] : [];
+  const norm = normalize([desc, ...extra].filter(Boolean).join(" "));
+  const padded = " " + norm + " ";
+
+  const hit = matchGroups(padded, COMPILED_PRE) || matchGroups(padded, COMPILED);
+  if (hit) return { cat: hit, source: "rule" };
+
+  const personal = isPersonalTransfer(desc);
+  if (!personal) {
+    const f = fuzzyMatch(norm);
+    if (f) return { cat: f, source: "rule" };
+  }
+  if (pluggy) {
+    const p = mapPluggyCategory(pluggy.category);
+    if (p) return { cat: p, source: "pluggy" };
+  }
+  const m = predictModel(model, desc);
+  if (m) return { cat: m, source: "model" };
+  if (cache && !personal) {
+    const c = cache.get(merchantKey(desc));
+    if (c && c !== "nao_identificada") return { cat: c, source: "llm" };
+  }
+  return { cat: "nao_identificada", source: null };
+}
+function categorize(desc, opts) { return categorizeFull(desc, opts).cat; }
+
+/* ---------- contexto do usuário: regras aprendidas + modelo treinado no histórico dele ---------- */
+async function loadLearnedRules(userId) {
+  const rows = await all("SELECT key, category FROM category_rules WHERE user_id = ?", [userId]);
+  return new Map(rows.map(r => [r.key, r.category]));
+}
+async function buildUserCtx(userId) {
+  const learned = await loadLearnedRules(userId);
+  // treina só com o que é confiável: correções manuais e regras (nunca com chutes anteriores da própria IA)
+  const rows = await all(
+    `SELECT "desc" AS d, category, COALESCE(category_manual, 0) AS manual FROM transactions
+     WHERE user_id = ? AND category <> 'nao_identificada' AND COALESCE(category_source, '') NOT IN ('model', 'llm')`,
+    [userId]
+  );
+  const model = buildModel(rows.map(r => ({ desc: r.d, category: r.category, manual: Number(r.manual) === 1 })));
+  return { learned, model };
+}
+function classify(desc, ctx, pluggy) {
+  return categorizeFull(desc, { pluggy, learned: ctx.learned, model: ctx.model, cache: merchantCache });
+}
+
+// Roda a categorização de novo nas transações ainda "não identificadas" (nunca mexe no que o usuário escolheu à mão).
+// userId opcional: sem ele, processa todos os usuários (usado no boot).
+async function recategorizeUnidentified(userId = null) {
+  const rows = userId == null
+    ? await all(`SELECT id, user_id, "desc" AS d FROM transactions WHERE category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0`)
+    : await all(`SELECT id, user_id, "desc" AS d FROM transactions WHERE user_id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0`, [userId]);
+  if (!rows.length) return 0;
+  const ctxByUser = new Map();
+  const updates = [];
+  for (const r of rows) {
+    if (!ctxByUser.has(r.user_id)) ctxByUser.set(r.user_id, await buildUserCtx(r.user_id));
+    const { cat, source } = classify(r.d, ctxByUser.get(r.user_id));
+    if (cat !== "nao_identificada") updates.push({ sql: "UPDATE transactions SET category = ?, category_source = ? WHERE id = ?", args: [cat, source, r.id] });
+  }
+  for (let i = 0; i < updates.length; i += 200) await db.batch(updates.slice(i, i + 200), "write");
+  return updates.length;
+}
+
+/* ---------- Claude como último recurso (OPCIONAL) ----------
+   Só liga se existir ANTHROPIC_API_KEY no .env. Manda apenas o NOME do estabelecimento
+   (minúsculo, sem números, sem valor, sem dados do usuário) e nunca Pix/TED/transferências.
+   A resposta fica em cache (merchant_cache): cada estabelecimento é perguntado uma única vez. */
+const LLM_CATEGORIES = ["alimentacao", "transporte", "contas", "entretenimento", "compras", "saude", "educacao", "viagens",
+  "transferencias", "fatura", "investimentos", "taxas", "outros", "salario", "nao_identificada"];
+let merchantCache = new Map();
+let llmRunning = false;
+async function loadMerchantCache() {
+  const rows = await all("SELECT key, category FROM merchant_cache");
+  merchantCache = new Map(rows.map(r => [r.key, r.category]));
+}
+async function classifyPendingWithClaude(limit = 40) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || llmRunning) return 0;
+  llmRunning = true;
+  try {
+    const rows = await all(`SELECT id, "desc" AS d FROM transactions WHERE category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0`);
+    const keys = [];
+    for (const r of rows) {
+      if (isPersonalTransfer(r.d)) continue;
+      const k = merchantKey(r.d);
+      if (k && !merchantCache.has(k) && !keys.includes(k)) keys.push(k);
+      if (keys.length >= limit) break;
+    }
+    if (keys.length) {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        signal: AbortSignal.timeout(45000),
+        body: JSON.stringify({
+          model: process.env.CATEGORY_LLM_MODEL || "claude-haiku-4-5-20251001",
+          max_tokens: 3000,
+          system: "Você classifica nomes de estabelecimentos de extratos bancários brasileiros (já em minúsculas e sem números) em categorias de gastos pessoais. " +
+            "Categorias válidas: alimentacao (restaurantes, mercados, delivery), transporte (apps de corrida, combustível, estacionamento, pedágio, oficina), " +
+            "contas (luz, água, gás, internet, telefone, aluguel, condomínio, seguros), entretenimento (streaming, jogos, cinema, shows), " +
+            "compras (lojas, e-commerce, roupas, eletrônicos, casa), saude (farmácia, médico, plano, academia), educacao, viagens (hotel, passagem, aluguel de carro), " +
+            "transferencias, fatura (pagamento de cartão), investimentos, taxas (tarifas, impostos, juros), outros, " +
+            "nao_identificada (use quando não der para ter uma certeza razoável). " +
+            'Responda SOMENTE com um objeto JSON {"nome recebido":"categoria"} contendo TODOS os nomes recebidos, sem texto extra.',
+          messages: [{ role: "user", content: JSON.stringify(keys) }],
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const text = ((data.content || []).find(b => b.type === "text") || {}).text || "";
+      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+      const stmts = [];
+      for (const k of keys) {
+        const c = LLM_CATEGORIES.includes(parsed[k]) ? parsed[k] : "nao_identificada";
+        merchantCache.set(k, c);
+        stmts.push({ sql: "INSERT OR REPLACE INTO merchant_cache (key, category, updated_at) VALUES (?,?,datetime('now'))", args: [k, c] });
+      }
+      await db.batch(stmts, "write");
+    }
+    // aplica o que está no cache em tudo que ainda está sem categoria
+    const updates = [];
+    for (const r of rows) {
+      if (isPersonalTransfer(r.d)) continue;
+      const c = merchantCache.get(merchantKey(r.d));
+      if (c && c !== "nao_identificada") {
+        updates.push({ sql: "UPDATE transactions SET category = ?, category_source = 'llm' WHERE id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0", args: [c, r.id] });
+      }
+    }
+    for (let i = 0; i < updates.length; i += 200) await db.batch(updates.slice(i, i + 200), "write");
+    if (updates.length) console.log(`[categorias] Claude classificou ${updates.length} transações`);
+    return updates.length;
+  } catch (e) {
+    console.error("[categorias] falha ao consultar o Claude (segue sem):", e.message);
+    return 0;
+  } finally {
+    llmRunning = false;
+  }
 }
 function roundVal(v) { return Math.round(v * 100) / 100; }
 
@@ -243,6 +644,14 @@ app.put("/api/me/preferences", auth, h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Chamada uma vez ao abrir o app: devolve a data do acesso ANTERIOR (para o aviso de "vamos revisar as categorias?")
+// e já grava o acesso de agora.
+app.post("/api/me/visit", auth, h(async (req, res) => {
+  const u = await get("SELECT last_seen_at FROM users WHERE id = ?", [req.userId]);
+  await run("UPDATE users SET last_seen_at = ? WHERE id = ?", [new Date().toISOString(), req.userId]);
+  res.json({ previous: (u && u.last_seen_at) || null });
+}));
+
 /* ============================================================
    TRANSAÇÕES
    ============================================================ */
@@ -251,11 +660,39 @@ app.get("/api/transactions", auth, h(async (req, res) => {
   res.json(rows);
 }));
 
+// Ao trocar a categoria de uma transação o app APRENDE: guarda a regra desse estabelecimento e já
+// aplica nas outras transações parecidas (que não foram escolhidas à mão). Vale também para as próximas.
 app.put("/api/transactions/:id/category", auth, h(async (req, res) => {
   const { category } = req.body;
-  const info = await run("UPDATE transactions SET category = ? WHERE id = ? AND user_id = ?", [category, req.params.id, req.userId]);
-  if (!info.changes) return res.status(404).json({ error: "Transação não encontrada" });
-  res.json({ ok: true });
+  if (!category || typeof category !== "string") return res.status(400).json({ error: "Categoria inválida" });
+  const tx = await get(`SELECT id, "desc" AS d FROM transactions WHERE id = ? AND user_id = ?`, [req.params.id, req.userId]);
+  if (!tx) return res.status(404).json({ error: "Transação não encontrada" });
+  await run("UPDATE transactions SET category = ?, category_manual = 1, category_source = 'manual' WHERE id = ? AND user_id = ?", [category, tx.id, req.userId]);
+
+  let applied = 0;
+  const key = merchantKey(tx.d);
+  if (key) {
+    if (category === "nao_identificada") {
+      await run("DELETE FROM category_rules WHERE user_id = ? AND key = ?", [req.userId, key]);
+    } else {
+      await run(
+        `INSERT INTO category_rules (user_id, key, category) VALUES (?,?,?)
+         ON CONFLICT(user_id, key) DO UPDATE SET category = excluded.category`,
+        [req.userId, key, category]
+      );
+      const rows = await all(
+        `SELECT id, "desc" AS d FROM transactions WHERE user_id = ? AND COALESCE(category_manual, 0) = 0 AND id <> ? AND category <> ?`,
+        [req.userId, tx.id, category]
+      );
+      const updates = rows.filter(r => merchantKey(r.d) === key)
+        .map(r => ({ sql: "UPDATE transactions SET category = ?, category_source = 'learned' WHERE id = ? AND user_id = ?", args: [category, r.id, req.userId] }));
+      for (let i = 0; i < updates.length; i += 200) await db.batch(updates.slice(i, i + 200), "write");
+      applied = updates.length;
+      // a correção também ensina o modelo: tenta de novo nas que ainda estão sem categoria (nomes parecidos, não idênticos)
+      applied += await recategorizeUnidentified(req.userId);
+    }
+  }
+  res.json({ ok: true, applied });
 }));
 
 app.delete("/api/transactions/:id", auth, h(async (req, res) => {
@@ -414,6 +851,14 @@ async function syncPluggyItemData(item, headers) {
   if (!accResp.ok) throw new Error(`Falha ao buscar contas no Pluggy (HTTP ${accResp.status})`);
   const { results: accounts } = await accResp.json();
 
+  const ctx = await buildUserCtx(item.user_id);
+  // transações antigas ainda "não identificadas" desta conexão: se agora dá para classificar, atualiza
+  const pendentes = new Set((await all(
+    "SELECT external_id FROM transactions WHERE user_id = ? AND bank_id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0 AND external_id IS NOT NULL",
+    [item.user_id, item.item_id]
+  )).map(r => r.external_id));
+  const updStatements = [];
+
   const contas = [];
   const txStatements = [];
   let allOk = true;
@@ -432,13 +877,20 @@ async function syncPluggyItemData(item, headers) {
       const desc = t.description || "Transação";
       const value = pluggyValue(t.amount, acc.type);
       const date = (t.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+      const { cat, source } = classify(desc, ctx, t);
+      if (pendentes.has(t.id) && cat !== "nao_identificada") {
+        updStatements.push({
+          sql: "UPDATE transactions SET category = ?, category_source = ?, pluggy_category = ? WHERE user_id = ? AND external_id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0",
+          args: [cat, source, t.category || null, item.user_id, t.id]
+        });
+      }
       txStatements.push({
-        sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category, external_id, account_id, account_name, account_type)
-              SELECT ?,?,?,?,?,?,?,?,?,?,?
+        sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category, external_id, account_id, account_name, account_type, pluggy_category, category_source)
+              SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
               WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND external_id = ?)`,
         args: [
-          item.user_id, date, desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
-          t.id, acc.id, acc.name || null, acc.type || null,
+          item.user_id, date, desc, item.item_id, value, value >= 0 ? "entrada" : "saida", cat,
+          t.id, acc.id, acc.name || null, acc.type || null, t.category || null, source,
           item.user_id, t.id
         ]
       });
@@ -465,12 +917,14 @@ async function syncPluggyItemData(item, headers) {
   if (allOk) {
     statements.push({ sql: "DELETE FROM transactions WHERE user_id = ? AND bank_id = ? AND external_id IS NULL", args: [item.user_id, item.item_id] });
   }
+  statements.push(...updStatements); // antes do offset, para não contar como "novas"
   const offset = statements.length;
   statements.push(...txStatements);
 
   const results = await db.batch(statements, "write");
   const novas = results.slice(offset).reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
   await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
+  classifyPendingWithClaude().catch(() => {}); // opcional; só age se ANTHROPIC_API_KEY existir
   return { accounts, contas, transacoesProcessadas, novas };
 }
 
@@ -547,6 +1001,10 @@ async function removeDemoData() {
 
 initDb()
   .then(removeDemoData)
+  .then(loadMerchantCache)
+  .then(() => recategorizeUnidentified())
+  .then((n) => { if (n) console.log(`[categorias] ${n} transações reclassificadas automaticamente`); })
+  .then(() => { classifyPendingWithClaude().catch(() => {}); })
   .then(() => {
     app.listen(PORT, () => console.log(`FinanApp backend rodando em http://localhost:${PORT}`));
   })

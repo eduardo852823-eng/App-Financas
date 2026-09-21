@@ -476,13 +476,14 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .is-loading{opacity:.8; pointer-events:none; cursor:progress;}
 .btn-connect.is-loading, .btn.is-loading{display:inline-flex; align-items:center; justify-content:center;}
 
+/* indicador de carregamento discreto: fica na barra do topo (ao lado do botão de tema), sem fundo nem sombra */
 .screen-loader{
-  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.9); z-index:40;
-  background:var(--card-bg); padding:16px; border-radius:18px; box-shadow:var(--shadow-md);
+  display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; flex:none;
   opacity:0; visibility:hidden; pointer-events:none;
-  transition:opacity .18s ease, transform .18s ease, visibility .18s ease;
+  transition:opacity .25s ease, visibility .25s ease;
 }
-.screen-loader.show{opacity:1; visibility:visible; transform:translate(-50%,-50%) scale(1);}
+.screen-loader.show{opacity:.7; visibility:visible;}
+.screen-loader .dots-spinner{--r:6.5px; --d:3px; width:18px; height:18px;}
 
 /* ============================================================
    MINHAS INSTITUIÇÕES
@@ -529,3 +530,42 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .bill-item{background:var(--bg-soft); border-radius:12px; padding:10px 12px; margin-bottom:8px;}
 .bill-head{display:flex; justify-content:space-between; font-size:13.5px; margin-bottom:4px;}
 .card-tx-btn{margin-top:12px; width:100%;}
+
+
+/* ============================================================
+   FILTRO DE PERÍODO + REVISÃO DE CATEGORIAS
+   ============================================================ */
+.filters-row.filters-4{display:grid; grid-template-columns:1fr 1fr;}
+.filters-row.filters-4 select{min-width:0; width:100%;}
+@media (min-width:640px){
+  .filters-row.filters-4{grid-template-columns:repeat(4,1fr);}
+}
+
+.review-banner{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--card-bg); border:1.5px dashed var(--gray-300); border-radius:var(--radius-md);
+  padding:11px 14px; margin-bottom:14px; font-size:13.5px; color:var(--text-main);
+}
+.review-banner b{color:var(--navy);}
+.review-banner button{
+  flex:none; border:none; cursor:pointer; background:var(--blue); color:#fff;
+  font-weight:600; font-size:13px; padding:8px 14px; border-radius:10px;
+}
+
+.rev-intro{text-align:center; padding:6px 0 2px;}
+.rev-intro .rev-emoji{font-size:38px; line-height:1; margin-bottom:10px;}
+.rev-intro p{color:var(--text-secondary); font-size:14px; line-height:1.5; margin-top:8px;}
+.rev-intro p strong{color:var(--navy);}
+.rev-progress{font-size:12.5px; font-weight:600; color:var(--text-secondary); margin-bottom:8px; display:flex; justify-content:space-between;}
+.rev-bar{height:4px; border-radius:4px; background:var(--gray-100); margin-bottom:14px; overflow:hidden;}
+.rev-bar i{display:block; height:100%; background:var(--blue); border-radius:4px; transition:width .25s ease;}
+.rev-tx{background:var(--bg-soft); border-radius:var(--radius-md); padding:14px; margin-bottom:14px; text-align:center;}
+.rev-desc{font-weight:700; font-size:15px; color:var(--navy); overflow-wrap:anywhere;}
+.rev-value{font-size:22px; font-weight:800; margin:6px 0 2px;}
+.rev-value.pos{color:var(--green, #16A34A);}
+.rev-value.neg{color:var(--red);}
+.rev-meta{font-size:12px; color:var(--text-secondary);}
+.rev-note{font-size:12.5px; color:var(--blue); font-weight:600; margin-bottom:10px; text-align:center;}
+.rev-actions{display:flex; gap:10px; margin-top:14px;}
+.rev-actions .btn{margin-top:0 !important;}
+#rev-grid{max-height:38vh; overflow-y:auto;}

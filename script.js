@@ -17,6 +17,11 @@ const CATEGORIES = [
   { id: "compras", name: "Compras", color: "#EC4899", icon: "🛍️" },
   { id: "saude", name: "Saúde", color: "#EF4444", icon: "❤️" },
   { id: "educacao", name: "Educação", color: "#14B8A6", icon: "🎓" },
+  { id: "viagens", name: "Viagens", color: "#0EA5E9", icon: "✈️" },
+  { id: "transferencias", name: "Transferências", color: "#64748B", icon: "🔁" },
+  { id: "fatura", name: "Fatura do cartão", color: "#F97316", icon: "💳" },
+  { id: "investimentos", name: "Investimentos", color: "#10B981", icon: "📈" },
+  { id: "taxas", name: "Taxas e impostos", color: "#B45309", icon: "🧾" },
   { id: "outros", name: "Outros", color: "#9CA3AF", icon: "📦" },
   { id: "salario", name: "Salário", color: "#16A34A", icon: "💰" },
   { id: "nao_identificada", name: "Não identificada", color: "#CBD5E1", icon: "❓" }
@@ -187,6 +192,13 @@ function cardUsed(a) {
   return limit !== null && avail !== null ? limit - avail : num(a.balance);
 }
 function effectiveCategory(t) { return t.category; }
+// "chute" da IA (modelo treinado no seu histórico ou Claude): aparece com ✨ para você confirmar ou corrigir
+function isGuess(t) { return t.category_source === "model" || t.category_source === "llm"; }
+function needsReview(t) { return !Number(t.category_manual) && (t.category === "nao_identificada" || isGuess(t)); }
+function sourceLabel(t) {
+  if (Number(t.category_manual) || t.category_source === "manual") return "Você";
+  return { learned: "Aprendido com suas correções", rule: "Regra automática", pluggy: "Categoria do banco", model: "IA (seu histórico) ✨", llm: "IA (Claude) ✨" }[t.category_source] || (t.category === "nao_identificada" ? "—" : "Automática");
+}
 
 /* ============================================================
    APP STATE (filtros de tela)
@@ -195,6 +207,7 @@ let currentScreen = "inicio";
 let dashFilterPeriodo = "all";
 let dashFilterBanco = "all";
 let txSearch = "";
+let txFilterPeriodo = "all";
 let txFilterBanco = "all";
 let txFilterTipo = "all";
 let txFilterCategoria = "all";
@@ -245,6 +258,7 @@ function showApp() {
   document.getElementById("screen-login").classList.remove("active");
   document.getElementById("main-app").classList.add("active");
   navigateTo("inicio", { refresh: false });
+  setTimeout(checkReviewPrompt, 700);
 }
 function navigateTo(screen, { refresh = true } = {}) {
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
@@ -294,8 +308,37 @@ function getAvailableMonths() {
   const set = new Set(state.transactions.map(t => t.date.slice(0,7)));
   return Array.from(set).sort().reverse();
 }
-function filterTx(txs, { periodo, banco, tipo, categoria, search } = {}) {
+// Períodos rápidos da tela de Transações (datas no fuso do aparelho, não em UTC)
+const TX_PERIODS = [
+  { id: "all", label: "Todo o período" },
+  { id: "today", label: "Hoje" },
+  { id: "3d", label: "Últimos 3 dias" },
+  { id: "7d", label: "Última semana" },
+  { id: "15d", label: "Últimos 15 dias" },
+  { id: "30d", label: "Últimos 30 dias" },
+  { id: "month", label: "Este mês" },
+  { id: "lastmonth", label: "Mês passado" },
+  { id: "90d", label: "Últimos 3 meses" }
+];
+function ymdLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function periodRange(id) {
+  const now = new Date();
+  const today = ymdLocal(now);
+  const back = (n) => { const d = new Date(now); d.setDate(d.getDate() - n); return ymdLocal(d); };
+  const days = { "3d": 3, "7d": 7, "15d": 15, "30d": 30, "90d": 90 };
+  if (id === "today") return { from: today, to: today };
+  if (days[id]) return { from: back(days[id] - 1), to: today };
+  if (id === "month") return { from: today.slice(0, 8) + "01", to: today };
+  if (id === "lastmonth") {
+    return { from: ymdLocal(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymdLocal(new Date(now.getFullYear(), now.getMonth(), 0)) };
+  }
+  return null;
+}
+function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) {
   return txs.filter(t => {
+    if (range && (t.date < range.from || t.date > range.to)) return false;
     if (periodo && periodo !== "all" && t.date.slice(0,7) !== periodo) return false;
     if (banco && banco !== "all" && t.bank_id !== banco) return false;
     if (tipo && tipo !== "all" && t.type !== tipo) return false;
@@ -537,6 +580,9 @@ function renderBancos() {
    TRANSAÇÕES
    ============================================================ */
 function populateTxFilters() {
+  const periodoSel = document.getElementById("tx-filter-periodo");
+  periodoSel.innerHTML = TX_PERIODS.map(p => `<option value="${p.id}">${p.label}</option>`).join("");
+  periodoSel.value = txFilterPeriodo;
   const bancoSel = document.getElementById("tx-filter-banco");
   const connected = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
@@ -552,7 +598,8 @@ function populateTxFilters() {
 
 function renderTransacoes() {
   populateTxFilters();
-  const allTxs = filterTx(state.transactions, { banco: txFilterBanco, tipo: txFilterTipo, categoria: txFilterCategoria, search: txSearch })
+  renderTxReviewBanner();
+  const allTxs = filterTx(state.transactions, { range: periodRange(txFilterPeriodo), banco: txFilterBanco, tipo: txFilterTipo, categoria: txFilterCategoria, search: txSearch })
     .sort((a,b) => b.date.localeCompare(a.date));
   const container = document.getElementById("tx-list-container");
   if (!allTxs.length) {
@@ -588,7 +635,7 @@ function txRowHtml(t) {
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
           <span>${esc(info.name)} • ${isPos ? "Entrada" : "Saída"}</span>
-          <span class="tx-cat-chip">${cat.icon} ${cat.name}</span>
+          <span class="tx-cat-chip"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${cat.name}${isGuess(t) ? " ✨" : ""}</span>
         </div>
       </div>
     </div>
@@ -607,6 +654,7 @@ function openTxDetalhe(id) {
     <div class="detalhe-value ${isPos ? "pos" : "neg"}">${isPos ? "+ " : "- "}${fmtBRL(Math.abs(t.value))}</div>
     <div style="font-weight:700;font-size:15px">${esc(t.desc)}</div>
     <div class="detalhe-cat-badge">${cat.icon} ${cat.name}</div>
+    <div class="detalhe-info-row"><span>Categoria definida por</span><span>${sourceLabel(t)}</span></div>
     <div class="detalhe-info-row"><span>Banco</span><span>${esc(info.name)}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
     <div class="detalhe-info-row"><span>Tipo</span><span>${isPos ? "Entrada" : "Saída"}</span></div>
@@ -630,7 +678,7 @@ function openCategoriaModal(txId) {
   const t = state.transactions.find(x => x.id === Number(txId));
   pendingCatSelected = t ? effectiveCategory(t) : null;
   const grid = document.getElementById("cat-grid");
-  grid.innerHTML = CATEGORIES.filter(c => c.id !== "salario").map(c => `
+  grid.innerHTML = CATEGORIES.filter(c => c.id !== "salario" || (t && t.type === "entrada")).map(c => `
     <div class="cat-grid-item ${c.id === pendingCatSelected ? "selected" : ""}" data-cat-id="${c.id}">
       <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
       ${c.name}
@@ -640,10 +688,155 @@ function openCategoriaModal(txId) {
 }
 async function saveCategoria() {
   if (pendingCatTxId == null || !pendingCatSelected) return;
-  await api(`/transactions/${pendingCatTxId}/category`, { method: "PUT", body: { category: pendingCatSelected } });
+  const r = await api(`/transactions/${pendingCatTxId}/category`, { method: "PUT", body: { category: pendingCatSelected } });
   await refreshTransactions();
+  if (r && r.applied) alert(`Pronto! Também apliquei essa categoria em ${r.applied} transaç${r.applied === 1 ? "ão parecida" : "ões parecidas"}.`);
   closeAllModals();
   renderScreen(currentScreen);
+}
+
+
+/* ============================================================
+   REVISÃO DE CATEGORIAS
+   - Aviso automático: depois de ~1 mês sem abrir o app, pergunta
+     "vamos revisar as categorias dessas transações?" (só as novas
+     desde a última visita).
+   - Faixa na tela de Transações: revisar as "sem categoria".
+   Teste rápido: abra o app com ?revisar na URL para forçar o aviso.
+   ============================================================ */
+const REVIEW_GAP_DAYS = 30;
+const REVIEW_MAX = 30;
+const LAST_VISIT_KEY = "fh_last_visit";
+let reviewChecked = false;
+let review = { ids: [], pos: 0, done: 0, note: "" };
+
+function descKey(desc) {
+  return String(desc || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length > 1 && !/\d/.test(w)).slice(0, 3).join(" ");
+}
+function renderTxReviewBanner() {
+  const el = document.getElementById("tx-review-banner");
+  if (!el) return;
+  const sem = state.transactions.filter(t => t.category === "nao_identificada").length;
+  const chutes = state.transactions.filter(t => isGuess(t) && !Number(t.category_manual)).length;
+  if (!sem && !chutes) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const partes = [];
+  if (sem) partes.push(`❓ <b>${sem}</b> sem categoria`);
+  if (chutes) partes.push(`✨ <b>${chutes}</b> sugerida${chutes === 1 ? "" : "s"} pela IA`);
+  el.classList.remove("hidden");
+  el.innerHTML = `<span>${partes.join(" • ")}</span><button type="button" id="btn-open-revisao">Revisar</button>`;
+}
+function openReviewIntro(days, novas, semCat) {
+  document.getElementById("revisao-title").textContent = "Vamos revisar?";
+  document.getElementById("revisao-body").innerHTML = `
+    <div class="rev-intro">
+      <div class="rev-emoji">👋</div>
+      <strong style="font-size:16px;color:var(--navy)">Faz ${days} dias que você não entra por aqui</strong>
+      <p>Chegaram <strong>${novas}</strong> transaç${novas === 1 ? "ão nova" : "ões novas"} nesse tempo${semCat ? ` (${semCat} sem categoria)` : ""}.<br>Vamos revisar as categorias dessas transações?</p>
+    </div>
+    <div class="rev-actions">
+      <button class="btn btn-outline" type="button" data-rev="close">Agora não</button>
+      <button class="btn btn-primary" type="button" data-rev="start">Vamos!</button>
+    </div>`;
+  openModal("modal-revisao");
+}
+function startReview(ids) {
+  review = { ids, pos: 0, done: 0, note: "" };
+  document.getElementById("revisao-title").textContent = "Revisar categorias";
+  openModal("modal-revisao");
+  renderReviewStep();
+}
+function startUnidentifiedReview() {
+  const pend = state.transactions.filter(needsReview);
+  // sem categoria primeiro; dentro disso, agrupa por estabelecimento parecido (uma resposta já resolve várias, o servidor aprende)
+  const freq = {};
+  pend.forEach(t => { const k = descKey(t.desc); freq[k] = (freq[k] || 0) + 1; });
+  pend.sort((a, b) => (Number(b.category === "nao_identificada") - Number(a.category === "nao_identificada")) ||
+    (freq[descKey(b.desc)] - freq[descKey(a.desc)]) || (Math.abs(b.value) - Math.abs(a.value)));
+  startReview(pend.slice(0, REVIEW_MAX).map(t => t.id));
+}
+function renderReviewStep() {
+  const body = document.getElementById("revisao-body");
+  // pula as que já foram resolvidas sozinhas pelo aprendizado
+  while (review.pos < review.ids.length) {
+    const t = state.transactions.find(x => x.id === review.ids[review.pos]);
+    if (t) break;
+    review.pos++;
+  }
+  if (review.pos >= review.ids.length) {
+    body.innerHTML = `
+      <div class="rev-intro">
+        <div class="rev-emoji">🎉</div>
+        <strong style="font-size:16px;color:var(--navy)">Revisão concluída!</strong>
+        <p>${review.done ? `Você categorizou ${review.done} transaç${review.done === 1 ? "ão" : "ões"}.` : "Nada alterado."}${review.note ? `<br>${review.note}` : ""}</p>
+      </div>
+      <div class="rev-actions"><button class="btn btn-primary" type="button" data-rev="close">Fechar</button></div>`;
+    return;
+  }
+  const t = state.transactions.find(x => x.id === review.ids[review.pos]);
+  const info = instInfo(t.bank_id);
+  const cur = catInfo(t.category);
+  const isPos = t.value >= 0;
+  const total = review.ids.length;
+  const cats = CATEGORIES.filter(c => c.id !== "nao_identificada" && (c.id !== "salario" || t.type === "entrada"));
+  body.innerHTML = `
+    <div class="rev-progress"><span>${review.pos + 1} de ${total}</span><span>${cur.icon} ${cur.name}${isGuess(t) ? " ✨ sugerida" : ""}</span></div>
+    <div class="rev-bar"><i style="width:${Math.round((review.pos / total) * 100)}%"></i></div>
+    ${review.note ? `<div class="rev-note">${esc(review.note)}</div>` : ""}
+    <div class="rev-tx">
+      <div class="rev-desc">${esc(t.desc)}</div>
+      <div class="rev-value ${isPos ? "pos" : "neg"}">${isPos ? "+ " : "- "}${fmtBRL(Math.abs(t.value))}</div>
+      <div class="rev-meta">${fmtDate(t.date) || ""} • ${esc(info.name)}</div>
+    </div>
+    <div class="cat-grid" id="rev-grid">
+      ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${c.id}"><div class="cat-icon" style="background:${c.color}">${c.icon}</div>${c.name}</div>`).join("")}
+    </div>
+    <div class="rev-actions">
+      ${t.category === "nao_identificada"
+        ? `<button class="btn btn-outline" type="button" data-rev="skip">Pular</button>`
+        : `<button class="btn btn-primary" type="button" data-rev="confirm">✓ Está certo</button>`}
+    </div>`;
+}
+async function reviewPick(catId) {
+  const id = review.ids[review.pos];
+  const t = state.transactions.find(x => x.id === id);
+  if (!t) return;
+  review.note = "";
+  try {
+    if (catId !== t.category || !Number(t.category_manual)) {
+      const r = await api(`/transactions/${id}/category`, { method: "PUT", body: { category: catId } });
+      review.done++;
+      review.note = r && r.applied ? `✓ Salvo — apliquei em mais ${r.applied} parecida${r.applied === 1 ? "" : "s"}` : "✓ Salvo";
+      await refreshTransactions();
+      renderScreen(currentScreen);
+    }
+  } catch (e) { review.note = "Não consegui salvar: " + e.message; renderReviewStep(); return; }
+  review.pos++;
+  renderReviewStep();
+}
+async function checkReviewPrompt() {
+  if (reviewChecked) return;
+  reviewChecked = true;
+  const force = new URLSearchParams(location.search).has("revisar");
+  let previous = null;
+  try { previous = (await api("/me/visit", { method: "POST" })).previous; }
+  catch (e) { previous = localStorage.getItem(LAST_VISIT_KEY); }
+  localStorage.setItem(LAST_VISIT_KEY, new Date().toISOString());
+
+  let prevDate = previous ? new Date(previous) : null;
+  if (prevDate && isNaN(prevDate)) prevDate = null;
+  if (!prevDate && force) prevDate = new Date(Date.now() - REVIEW_GAP_DAYS * 864e5);
+  if (!prevDate) return; // primeira vez: nada para revisar
+  const days = Math.floor((Date.now() - prevDate.getTime()) / 864e5);
+  if (days < REVIEW_GAP_DAYS && !force) return;
+
+  const prevYmd = ymdLocal(prevDate);
+  const novas = state.transactions.filter(t => t.date > prevYmd || (parseDbDate(t.created_at) && parseDbDate(t.created_at) > prevDate));
+  if (!novas.length) return;
+  // sem categoria primeiro, depois as mais recentes
+  novas.sort((a, b) => (Number(b.category === "nao_identificada") - Number(a.category === "nao_identificada")) || b.date.localeCompare(a.date));
+  review = { ids: novas.slice(0, REVIEW_MAX).map(t => t.id), pos: 0, done: 0, note: "" };
+  openReviewIntro(Math.max(days, REVIEW_GAP_DAYS), novas.length, novas.filter(t => t.category === "nao_identificada").length);
 }
 
 /* ============================================================
@@ -1133,6 +1326,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   wire(() => {
     document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
+    document.getElementById("tx-filter-periodo").addEventListener("change", (e) => { txFilterPeriodo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-banco").addEventListener("change", (e) => { txFilterBanco = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-tipo").addEventListener("change", (e) => { txFilterTipo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-categoria").addEventListener("change", (e) => { txFilterCategoria = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
@@ -1156,6 +1350,17 @@ document.addEventListener("DOMContentLoaded", () => {
       item.classList.add("selected");
     });
     document.getElementById("btn-salvar-categoria").addEventListener("click", (e) => withLoading(e.currentTarget, saveCategoria));
+    document.getElementById("tx-review-banner").addEventListener("click", (e) => { if (e.target.closest("#btn-open-revisao")) startUnidentifiedReview(); });
+    document.getElementById("revisao-body").addEventListener("click", (e) => {
+      const cat = e.target.closest("[data-rev-cat]");
+      if (cat) return reviewPick(cat.dataset.revCat);
+      const act = e.target.closest("[data-rev]");
+      if (!act) return;
+      if (act.dataset.rev === "close") { closeAllModals(); renderScreen(currentScreen); }
+      if (act.dataset.rev === "start") startReview(review.ids);
+      if (act.dataset.rev === "skip") { review.note = ""; review.pos++; renderReviewStep(); }
+      if (act.dataset.rev === "confirm") { const cur = state.transactions.find(x => x.id === review.ids[review.pos]); if (cur) reviewPick(cur.category); }
+    });
   }, "transações");
 
   wire(() => {

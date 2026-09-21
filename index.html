@@ -67,6 +67,9 @@
       <button class="icon-btn back-btn hidden" id="btn-back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
       <div class="topbar-title" id="topbar-title">Início</div>
       <div class="topbar-actions">
+        <span class="screen-loader" id="screen-loader" aria-hidden="true"><span class="dots-spinner">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </span></span>
         <button class="icon-btn theme-toggle-btn" id="btn-theme-toggle" title="Alternar modo escuro">
           <svg id="theme-icon-sun" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
           <svg id="theme-icon-moon" class="hidden" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.4A9 9 0 1111.6 3a7 7 0 009.4 9.4z"/></svg>
@@ -149,7 +152,9 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
           <input type="text" id="search-transacoes" placeholder="Buscar transações...">
         </div>
-        <div class="filters-row">
+        <div class="review-banner hidden" id="tx-review-banner"></div>
+        <div class="filters-row filters-4">
+          <select id="tx-filter-periodo"><option value="all">Todo o período</option></select>
           <select id="tx-filter-banco"><option value="all">Todos os bancos</option></select>
           <select id="tx-filter-tipo">
             <option value="all">Todos os tipos</option>
@@ -279,6 +284,17 @@
     </div>
   </div>
 
+  <!-- ===================== REVISAR CATEGORIAS (modal) ===================== -->
+  <div class="modal-overlay" id="modal-revisao">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="revisao-title">Revisar categorias</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body" id="revisao-body"></div>
+    </div>
+  </div>
+
   <!-- ===================== PLUGGY: PEDIR CPF (modal) ===================== -->
   <div class="modal-overlay" id="modal-pluggy-cpf">
     <div class="modal-card">
@@ -379,10 +395,6 @@
   </div>
 
 </div>
-
-<div class="screen-loader" id="screen-loader" aria-hidden="true"><span class="dots-spinner">
-  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-</span></div>
 
 <script>window.FINANHUB_API_BASE = "https://app-financas-8xz9.onrender.com/api";</script>
 <script src="script.js"></script>
