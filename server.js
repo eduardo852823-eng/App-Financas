@@ -106,12 +106,18 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
   name TEXT,
   type TEXT,
   balance REAL,
-  updated_at TEXT
+  updated_at TEXT,
+  data TEXT,
+  bills TEXT
 );
 `);
   // colunas novas em transactions (ignora o erro se já existirem)
   for (const col of ["external_id TEXT", "account_id TEXT", "account_name TEXT", "account_type TEXT"]) {
     try { await db.execute(`ALTER TABLE transactions ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
+  }
+  // colunas novas em pluggy_accounts (dados completos da conta e faturas do cartão)
+  for (const col of ["data TEXT", "bills TEXT"]) {
+    try { await db.execute(`ALTER TABLE pluggy_accounts ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_external ON transactions(user_id, external_id)");
 }
@@ -296,6 +302,19 @@ async function fetchAllPluggyTransactions(accountId, headers) {
   return list;
 }
 
+// Faturas de um cartão de crédito (GET /bills?accountId=). Nem toda instituição devolve;
+// se der erro ou vier vazio, segue sem faturas em vez de quebrar a sincronização.
+async function fetchPluggyBills(accountId, headers) {
+  try {
+    const resp = await fetch(`${PLUGGY_BASE_URL}/bills?accountId=${accountId}`, { headers });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data.results) ? data.results : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 // Em cartão de crédito o Pluggy manda compra como valor positivo (aumenta a fatura)
 // e pagamento/estorno como negativo; no app compra é saída, então inverte o sinal.
 function pluggyValue(amount, accountType) {
@@ -365,8 +384,9 @@ app.get("/api/pluggy/items", auth, h(async (req, res) => {
 
 // Contas (banco / cartão) de todas as conexões do usuário, com o saldo real informado pelo Pluggy.
 app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
-  const rows = await all("SELECT account_id, item_id, name, type, balance FROM pluggy_accounts WHERE user_id = ?", [req.userId]);
-  res.json(rows);
+  const rows = await all("SELECT account_id, item_id, name, type, balance, updated_at, data, bills FROM pluggy_accounts WHERE user_id = ?", [req.userId]);
+  const parse = (txt) => { try { return txt ? JSON.parse(txt) : null; } catch (e) { return null; } };
+  res.json(rows.map(r => ({ ...r, data: parse(r.data), bills: parse(r.bills) || [] })));
 }));
 
 // Desconecta um item (remove do nosso banco e deleta no Pluggy).
@@ -426,11 +446,20 @@ async function syncPluggyItemData(item, headers) {
     }
   }
 
+  const billsByAccount = {};
+  for (const acc of accounts) {
+    if (acc.type === "CREDIT") billsByAccount[acc.id] = await fetchPluggyBills(acc.id, headers);
+  }
   const statements = accounts.map(acc => ({
-    sql: `INSERT INTO pluggy_accounts (account_id, user_id, item_id, name, type, balance, updated_at)
-          VALUES (?,?,?,?,?,?, datetime('now'))
-          ON CONFLICT(account_id) DO UPDATE SET name = excluded.name, type = excluded.type, balance = excluded.balance, updated_at = excluded.updated_at`,
-    args: [acc.id, item.user_id, item.item_id, acc.name || null, acc.type || null, typeof acc.balance === "number" ? acc.balance : null]
+    sql: `INSERT INTO pluggy_accounts (account_id, user_id, item_id, name, type, balance, updated_at, data, bills)
+          VALUES (?,?,?,?,?,?, datetime('now'), ?, ?)
+          ON CONFLICT(account_id) DO UPDATE SET name = excluded.name, type = excluded.type, balance = excluded.balance,
+            updated_at = excluded.updated_at, data = excluded.data, bills = excluded.bills`,
+    args: [
+      acc.id, item.user_id, item.item_id, acc.name || null, acc.type || null,
+      typeof acc.balance === "number" ? acc.balance : null,
+      JSON.stringify(acc), billsByAccount[acc.id] ? JSON.stringify(billsByAccount[acc.id]) : null
+    ]
   }));
   // Só uma vez: apaga as transações antigas dessa conexão que foram salvas antes de existir o vínculo com a conta
   if (allOk) {

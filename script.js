@@ -26,7 +26,55 @@ function fmtBRL(v) {
   const sign = v < 0 ? "-" : "";
   return sign + "R$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function initials(name) { return name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
+// Escapa texto vindo de fora (descrição de Pix/compra, nome de conta) antes de colocar em innerHTML
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function initials(name) { return esc(String(name || "").split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()); }
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+// O banco grava datas em UTC sem fuso ("2026-09-21 19:00:58"); sem isso o navegador lê como horário local e mostra 3h a mais
+function parseDbDate(str) {
+  if (!str) return null;
+  const iso = /Z$|[+-]\d\d:\d\d$/.test(str) ? str : String(str).replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  return isNaN(d) ? null : d;
+}
+function fmtDateTime(str) { const d = parseDbDate(str); return d ? d.toLocaleString("pt-BR") : "nunca"; }
+function fmtDate(str) {
+  const m = String(str || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+}
+
+/* ============================================================
+   FEEDBACK DE CARREGAMENTO (bolinhas girando)
+   ============================================================ */
+const SPINNER_DOTS = "<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>";
+const SPINNER_SM = `<span class="dots-spinner sm" aria-hidden="true">${SPINNER_DOTS}</span>`;
+const MIN_BTN_SPIN_MS = 500;
+const SCREEN_LOADER_MS = 450;
+
+// Mostra as bolinhas no botão enquanto a ação roda (mínimo de 0,5 s, mesmo se for instantânea) e bloqueia clique duplo.
+async function withLoading(btn, fn, { minMs = MIN_BTN_SPIN_MS } = {}) {
+  if (!btn) return fn();
+  if (btn.dataset.loading === "1") return;
+  btn.dataset.loading = "1";
+  const original = btn.innerHTML;
+  btn.classList.add("is-loading");
+  btn.disabled = true;
+  btn.innerHTML = SPINNER_SM + original;
+  try {
+    const [result] = await Promise.all([fn(), sleep(minMs)]);
+    return result;
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("is-loading");
+    btn.innerHTML = original;
+    delete btn.dataset.loading;
+  }
+}
+function showScreenLoader() { document.getElementById("screen-loader")?.classList.add("show"); }
+function hideScreenLoader() { document.getElementById("screen-loader")?.classList.remove("show"); }
 const MONTH_NAMES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 /* ============================================================
@@ -45,6 +93,11 @@ async function api(path, { method = "GET", body } = {}) {
   });
   let data = null;
   try { data = await res.json(); } catch (e) { /* sem corpo */ }
+  if (res.status === 401 && token && !path.startsWith("/auth/")) {
+    // sessão expirou: volta para o login em vez de deixar o app "travado"
+    clearToken(); state.user = null; hideScreenLoader(); showLogin();
+    throw new Error("Sessão expirada. Entre novamente.");
+  }
   if (!res.ok) throw new Error((data && data.error) || "Erro de conexão com o servidor");
   return data;
 }
@@ -122,6 +175,17 @@ function instInfo(id) {
   return { name: id, color: "#94A3B8" };
 }
 function isCreditTx(t) { return t.account_type === "CREDIT"; }
+function bankAccountsOnly() { return connectedBanks().filter(b => b.type !== "CREDIT"); }
+function accountTypeLabel(a) {
+  const map = { CHECKING_ACCOUNT: "Conta corrente", SAVINGS_ACCOUNT: "Poupança", CREDIT_CARD: "Cartão de crédito" };
+  return map[a.data?.subtype] || (a.type === "CREDIT" ? "Cartão de crédito" : "Conta bancária");
+}
+// limite usado do cartão: limite total − disponível; se faltar, usa o saldo informado
+function cardUsed(a) {
+  const c = a.data?.creditData || {};
+  const limit = num(c.creditLimit), avail = num(c.availableCreditLimit);
+  return limit !== null && avail !== null ? limit - avail : num(a.balance);
+}
 function effectiveCategory(t) { return t.category; }
 
 /* ============================================================
@@ -180,9 +244,9 @@ function showLogin() {
 function showApp() {
   document.getElementById("screen-login").classList.remove("active");
   document.getElementById("main-app").classList.add("active");
-  navigateTo("inicio");
+  navigateTo("inicio", { refresh: false });
 }
-function navigateTo(screen) {
+function navigateTo(screen, { refresh = true } = {}) {
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
@@ -196,6 +260,24 @@ function navigateTo(screen) {
   document.getElementById("topbar-title").textContent = titles[screen] || "";
   renderScreen(screen);
   document.getElementById("content").scrollTop = 0;
+  loadScreenData(screen, refresh);
+}
+// Bolinhas ao trocar de tela; aproveita para buscar dados novos no servidor e redesenhar a tela.
+let navToken = 0;
+async function loadScreenData(screen, refresh) {
+  const mine = ++navToken;
+  showScreenLoader();
+  try {
+    const fetching = refresh && state.user
+      ? Promise.all([refreshTransactions(), refreshAccounts(), refreshPluggyItems()])
+      : Promise.resolve();
+    await Promise.all([fetching, sleep(SCREEN_LOADER_MS)]);
+    if (mine === navToken && refresh && state.user && currentScreen === screen) renderScreen(screen);
+  } catch (e) {
+    console.warn("não foi possível atualizar os dados:", e.message);
+  } finally {
+    if (mine === navToken) hideScreenLoader();
+  }
 }
 function renderScreen(screen) {
   if (screen === "inicio") renderDashboard();
@@ -234,9 +316,10 @@ function populateDashboardFilters() {
   periodoSel.value = dashFilterPeriodo;
 
   const bancoSel = document.getElementById("filter-banco");
-  const institutions = connectedBanks();
+  const institutions = bankAccountsOnly();
+  if (dashFilterBanco !== "all" && !institutions.some(i => i.id === dashFilterBanco)) dashFilterBanco = "all";
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
-    institutions.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
+    institutions.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
   bancoSel.value = dashFilterBanco;
 }
 function monthLabel(ym) {
@@ -247,36 +330,33 @@ function monthLabel(ym) {
 function renderDashboard() {
   populateDashboardFilters();
   let txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco });
-  // Cartão de crédito fica separado: em "Todos os bancos" os totais consideram só contas bancárias
-  // (senão o pagamento da fatura contaria duas vezes). Para ver o cartão, escolha-o no filtro.
-  if (dashFilterBanco === "all") txs = txs.filter(t => !isCreditTx(t));
+  // Cartão de crédito tem seção própria: entradas, saídas e categorias aqui contam só contas bancárias
+  // (senão o pagamento da fatura entraria duas vezes).
+  txs = txs.filter(t => !isCreditTx(t));
   const entradas = txs.filter(t => t.type === "entrada").reduce((s,t) => s + t.value, 0);
   const saidas = txs.filter(t => t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
 
-  // Saldo = saldo real informado pelo banco (contas bancárias). Sem contas sincronizadas, usa entradas − saídas.
-  const banks = connectedBanks();
-  const saldoContas = banks.filter(b => b.type !== "CREDIT" && (dashFilterBanco === "all" || b.id === dashFilterBanco) && typeof b.balance === "number");
-  const escolhida = banks.find(b => b.id === dashFilterBanco);
-  const saldo = escolhida && escolhida.type === "CREDIT" ? entradas - saidas
-    : saldoContas.length ? saldoContas.reduce((s,b) => s + b.balance, 0) : entradas - saidas;
+  // Saldo = saldo real informado pelo banco. Sem contas sincronizadas ainda, usa entradas − saídas.
+  const banks = bankAccountsOnly();
+  const saldoContas = banks.filter(b => (dashFilterBanco === "all" || b.id === dashFilterBanco) && typeof b.balance === "number");
+  const saldo = saldoContas.length ? saldoContas.reduce((s,b) => s + b.balance, 0) : entradas - saidas;
 
   document.getElementById("balance-total").textContent = fmtBRL(saldo);
   document.getElementById("total-entradas").textContent = fmtBRL(entradas);
   document.getElementById("total-saidas").textContent = fmtBRL(saidas);
   document.getElementById("balance-change").textContent = txs.length ? `${txs.length} transações no período` : "Nenhuma transação no período";
 
-  const allTx = state.transactions;
   const banksScroll = document.getElementById("banks-scroll");
   banksScroll.innerHTML = banks.map(i => {
-    const isCard = i.type === "CREDIT";
-    const bankTx = allTx.filter(t => t.bank_id === i.id);
-    const val = isCard ? -bankTx.reduce((s,t) => s + t.value, 0) : (typeof i.balance === "number" ? i.balance : bankTx.reduce((s,t) => s + t.value, 0));
+    const val = typeof i.balance === "number" ? i.balance : state.transactions.filter(t => t.bank_id === i.id).reduce((s,t) => s + t.value, 0);
     return `<div class="bank-chip">
       <div class="bank-icon" style="background:${i.color}">${initials(i.name)}</div>
       <div class="bank-amount">${fmtBRL(val)}</div>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${i.name}${isCard ? " · gastos" : ""}</div>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${esc(i.name)}</div>
     </div>`;
   }).join("") || `<div class="empty-state">Nenhum banco conectado ainda.</div>`;
+
+  renderCards();
 
   const saidasTx = txs.filter(t => t.type === "saida");
   const byCat = {};
@@ -286,6 +366,101 @@ function renderDashboard() {
   });
   drawDonut("donut-chart", byCat, saidas);
   renderLegend("donut-legend", byCat, saidas);
+}
+
+/* ============================================================
+   CARTÕES DE CRÉDITO (seção própria, com tudo que o Pluggy traz)
+   ============================================================ */
+function kvRow(label, valueHtml) {
+  if (valueHtml === null || valueHtml === undefined || valueHtml === "") return "";
+  return `<div class="kv-row"><span>${esc(label)}</span><span>${valueHtml}</span></div>`;
+}
+const CARD_STATUS = { ACTIVE: "Ativo", BLOCKED: "Bloqueado", CANCELLED: "Cancelado", INACTIVE: "Inativo" };
+const CARD_HOLDER = { MAIN: "Titular", ADDITIONAL: "Adicional" };
+const CARD_KNOWN = new Set(["id", "type", "subtype", "name", "marketingName", "taxNumber", "owner", "number", "balance", "itemId", "currencyCode", "creditData"]);
+const CREDIT_KNOWN = new Set(["level", "brand", "balanceCloseDate", "balanceDueDate", "availableCreditLimit", "creditLimit", "isLimitFlexible", "balanceForeignCurrency", "minimumPayment", "status", "holderType"]);
+const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
+const yesNo = (v) => (v === true ? "Sim" : v === false ? "Não" : null);
+
+function billHtml(b) {
+  const pays = (b.payments || []).reduce((s, p) => s + (num(p.amount) || 0), 0);
+  const charges = (b.financeCharges || []).reduce((s, p) => s + (num(p.amount) || 0), 0);
+  return `<div class="bill-item">
+    <div class="bill-head"><b>Vence em ${esc(fmtDate(b.dueDate) || "—")}</b><span>${money(b.totalAmount) || "—"}</span></div>
+    ${kvRow("Fechamento", esc(fmtDate(b.billClosingDate)))}
+    ${kvRow("Pagamento mínimo", money(b.minimumPaymentAmount))}
+    ${kvRow("Parcelamento", yesNo(b.allowsInstallments) === null ? null : (b.allowsInstallments ? "Permitido" : "Não permitido"))}
+    ${kvRow("Pagamentos feitos", (b.payments || []).length ? `${fmtBRL(pays)} (${b.payments.length})` : null)}
+    ${kvRow("Encargos", (b.financeCharges || []).length ? fmtBRL(charges) : null)}
+  </div>`;
+}
+
+function cardHtml(a) {
+  const d = a.data || {};
+  const c = d.creditData || {};
+  const color = pluggyColorFor(a.account_id);
+  const title = prettyName(d.marketingName || a.name) || "Cartão";
+  const limit = num(c.creditLimit), avail = num(c.availableCreditLimit), used = cardUsed(a);
+  const pct = limit ? Math.min(100, Math.max(0, ((used || 0) / limit) * 100)) : null;
+  const bills = [...(a.bills || [])].sort((x, y) => String(y.dueDate).localeCompare(String(x.dueDate)));
+  const bill = bills[0];
+  const spent = -state.transactions.filter(t => t.bank_id === a.account_id).reduce((s, t) => s + t.value, 0);
+  const sub = [c.brand, c.level].filter(Boolean).map(esc).join(" ") + (d.number ? ` • final ${esc(d.number)}` : "");
+  const extras = [
+    ...Object.entries(d).filter(([k, v]) => !CARD_KNOWN.has(k) && v !== null && typeof v !== "object"),
+    ...Object.entries(c).filter(([k, v]) => !CREDIT_KNOWN.has(k) && v !== null && typeof v !== "object")
+  ];
+
+  return `<div class="credit-card-item">
+    <div class="credit-card-top" style="background:${color}">
+      <div class="credit-card-name">${esc(title)}</div>
+      <div class="credit-card-sub">${sub || "Cartão de crédito"}</div>
+    </div>
+    <div class="credit-card-body">
+      ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>` : ""}
+      ${kvRow("Limite usado", money(used))}
+      ${kvRow("Limite disponível", money(avail))}
+      ${kvRow("Limite total", money(limit))}
+      ${bill
+        ? kvRow(`Fatura (vence ${fmtDate(bill.dueDate) || "—"})`, money(bill.totalAmount))
+        : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate)))}
+      ${kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))}
+      ${kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment))}
+      ${kvRow("Compras registradas nas transações", money(spent))}
+      <details class="card-details">
+        <summary>Ver todos os dados</summary>
+        ${kvRow("Nome", esc(d.name))}
+        ${kvRow("Nome comercial", esc(d.marketingName))}
+        ${kvRow("Titular", esc(d.owner))}
+        ${kvRow("CPF do titular", esc(d.taxNumber))}
+        ${kvRow("Cartão", d.number ? `final ${esc(d.number)}` : null)}
+        ${kvRow("Bandeira", esc(c.brand))}
+        ${kvRow("Nível", esc(c.level))}
+        ${kvRow("Situação", esc(CARD_STATUS[c.status] || c.status))}
+        ${kvRow("Tipo de titular", esc(CARD_HOLDER[c.holderType] || c.holderType))}
+        ${kvRow("Limite flexível", yesNo(c.isLimitFlexible))}
+        ${kvRow("Moeda", esc(d.currencyCode))}
+        ${kvRow("Saldo informado pelo banco", money(a.balance))}
+        ${kvRow("Saldo em moeda estrangeira", money(c.balanceForeignCurrency))}
+        ${kvRow("Vencimento (conta)", esc(fmtDate(c.balanceDueDate)))}
+        ${kvRow("Fechamento (conta)", esc(fmtDate(c.balanceCloseDate)))}
+        ${kvRow("Pagamento mínimo (conta)", money(c.minimumPayment))}
+        ${extras.map(([k, v]) => kvRow(k, esc(v))).join("")}
+        ${kvRow("Atualizado em", esc(fmtDateTime(a.updated_at)))}
+        ${bills.length ? `<div class="card-details-title">Faturas</div>${bills.slice(0, 6).map(billHtml).join("")}` : ""}
+      </details>
+      <button class="btn-connect card-tx-btn" data-card-tx="${esc(a.account_id)}">Ver transações do cartão</button>
+    </div>
+  </div>`;
+}
+
+function renderCards() {
+  const wrap = document.getElementById("cards-wrap");
+  const list = document.getElementById("cards-list");
+  if (!wrap || !list) return;
+  const cards = state.accounts.filter(a => a.type === "CREDIT");
+  wrap.classList.toggle("hidden", !cards.length);
+  list.innerHTML = cards.map(cardHtml).join("");
 }
 
 function themeColor(varName) {
@@ -365,7 +540,7 @@ function populateTxFilters() {
   const bancoSel = document.getElementById("tx-filter-banco");
   const connected = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
-    connected.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
+    connected.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
   bancoSel.value = txFilterBanco;
   document.getElementById("tx-filter-tipo").value = txFilterTipo;
 
@@ -408,11 +583,11 @@ function txRowHtml(t) {
   const isPos = t.value >= 0;
   return `<div class="tx-row" data-tx-id="${t.id}">
     <div class="tx-row-left">
-      <div class="tx-icon" style="background:${info.color}">${initials(t.desc.split(" ")[0])}</div>
+      <div class="tx-icon" style="background:${info.color}">${initials(t.desc)}</div>
       <div>
-        <div class="tx-desc">${t.desc}</div>
+        <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
-          <span>${info.name} • ${isPos ? "Entrada" : "Saída"}</span>
+          <span>${esc(info.name)} • ${isPos ? "Entrada" : "Saída"}</span>
           <span class="tx-cat-chip">${cat.icon} ${cat.name}</span>
         </div>
       </div>
@@ -430,9 +605,9 @@ function openTxDetalhe(id) {
   const dateFmt = t.date.split("-").reverse().join("/");
   document.getElementById("detalhe-body").innerHTML = `
     <div class="detalhe-value ${isPos ? "pos" : "neg"}">${isPos ? "+ " : "- "}${fmtBRL(Math.abs(t.value))}</div>
-    <div style="font-weight:700;font-size:15px">${t.desc}</div>
+    <div style="font-weight:700;font-size:15px">${esc(t.desc)}</div>
     <div class="detalhe-cat-badge">${cat.icon} ${cat.name}</div>
-    <div class="detalhe-info-row"><span>Banco</span><span>${info.name}</span></div>
+    <div class="detalhe-info-row"><span>Banco</span><span>${esc(info.name)}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
     <div class="detalhe-info-row"><span>Tipo</span><span>${isPos ? "Entrada" : "Saída"}</span></div>
     <div class="detalhe-info-row"><span>Origem</span><span>${isPluggyBank(t.bank_id) ? "Open Finance (real)" : "Manual"}</span></div>
@@ -520,7 +695,7 @@ function populateRelatorioFilters() {
 
   const bancoSel = document.getElementById("rel-banco");
   const connected = connectedBanks();
-  bancoSel.innerHTML = `<option value="all">Todos</option>` + connected.map(i => `<option value="${i.id}">${i.name}</option>`).join("");
+  bancoSel.innerHTML = `<option value="all">Todos</option>` + bankAccountsOnly().map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
 
   const catSel = document.getElementById("rel-categoria");
   catSel.innerHTML = `<option value="all">Todas</option>` + CATEGORIES.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
@@ -540,6 +715,7 @@ function relFilteredTx() {
     if (ano && !t.date.startsWith(ano)) return false;
     if (mes !== "all" && parseInt(t.date.slice(5,7))-1 !== parseInt(mes)) return false;
     if (banco !== "all" && t.bank_id !== banco) return false;
+    if (banco === "all" && isCreditTx(t)) return false; // cartão fica de fora dos totais gerais
     if (categoria !== "all" && effectiveCategory(t) !== categoria) return false;
     return true;
   });
@@ -570,7 +746,7 @@ function computeRelGeral() {
   const el = document.getElementById("rel-por-banco");
   el.innerHTML = connected.map(i => {
     const val = txs.filter(t => t.bank_id === i.id && t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
-    return `<div class="bank-line-row"><span>${i.name}</span><span>${fmtBRL(val)}</span></div>`;
+    return `<div class="bank-line-row"><span>${esc(i.name)}</span><span>${fmtBRL(val)}</span></div>`;
   }).join("") || `<div class="empty-state">Nenhum banco conectado.</div>`;
 }
 
@@ -658,6 +834,7 @@ async function afterLoginSuccess(token) {
 
 async function logoutUser() {
   clearToken();
+  state.user = null; state.transactions = []; state.accounts = []; state.pluggyItems = [];
   closeAllModals();
   showLogin();
 }
@@ -729,19 +906,40 @@ function renderPluggyItems() {
     el.innerHTML = `<div class="empty-state">Nenhuma conta real conectada ainda.</div>`;
     return;
   }
-  el.innerHTML = state.pluggyItems.map(p => `
-    <div class="bank-row">
-      <div class="bank-row-left">
-        <div class="bank-avatar" style="background:${pluggyColorFor(p.item_id)}">${initials(p.institution_name || "Conta")}</div>
-        <div>
-          <div class="bank-row-name">${p.institution_name || "Conta conectada"}</div>
-          <div class="bank-status connected"><span class="dot-status"></span>CPF ${maskCpf(p.cpf)} • última sinc.: ${p.last_sync ? new Date(p.last_sync).toLocaleString("pt-BR") : "nunca"}</div>
+  el.innerHTML = state.pluggyItems.map(p => {
+    const accs = state.accounts.filter(a => a.item_id === p.item_id);
+    const bankNames = accs.filter(a => a.type !== "CREDIT").map(a => prettyName(a.name));
+    const title = bankNames.length ? bankNames.join(" • ") : (accs.length ? accs.map(a => accountLabel(a)).join(" • ") : (p.institution_name || "Conta conectada"));
+    const accsHtml = accs.length ? accs.map(a => {
+      const isCard = a.type === "CREDIT";
+      const val = isCard ? cardUsed(a) : num(a.balance);
+      return `<div class="inst-acc">
+        <div class="bank-avatar" style="background:${pluggyColorFor(a.account_id)}">${initials(accountLabel(a))}</div>
+        <div class="inst-acc-info">
+          <div class="inst-acc-name">${esc(accountLabel(a))}</div>
+          <div class="inst-acc-sub">${esc(accountTypeLabel(a))}${a.data?.number ? ` • final ${esc(a.data.number)}` : ""}</div>
+        </div>
+        <div class="inst-acc-value">
+          <div class="inst-acc-amount">${val !== null ? fmtBRL(val) : "—"}</div>
+          <div class="inst-acc-label">${isCard ? "Limite usado" : "Saldo"}</div>
+        </div>
+      </div>`;
+    }).join("") : `<div class="inst-empty">Nenhuma conta carregada ainda. Clique em Sincronizar.</div>`;
+    return `<div class="inst-conn">
+      <div class="inst-conn-head">
+        <div class="inst-conn-info">
+          <div class="inst-conn-title">${esc(title)}</div>
+          <div class="bank-status connected"><span class="dot-status"></span>Conectado via ${esc(p.institution_name || "Pluggy")}</div>
+          <div class="inst-conn-sub">CPF ${esc(maskCpf(p.cpf))} • última sinc.: ${esc(fmtDateTime(p.last_sync))}</div>
+        </div>
+        <div class="inst-conn-actions">
+          <button class="btn-connect connected" data-pluggy-sync="${esc(p.item_id)}">Sincronizar</button>
+          <button class="btn-connect danger" data-pluggy-remove="${esc(p.id)}">Remover</button>
         </div>
       </div>
-      <button class="btn-connect connected" data-pluggy-sync="${p.item_id}">Sincronizar</button>
-      <button class="btn btn-danger" style="margin-left:6px;padding:8px 10px" data-pluggy-remove="${p.id}">Remover</button>
-    </div>
-  `).join("");
+      <div class="inst-accs">${accsHtml}</div>
+    </div>`;
+  }).join("");
 }
 function maskCpf(cpf) {
   if (!cpf) return "—";
@@ -775,37 +973,43 @@ async function startPluggyConnect() {
     return;
   }
 
-  try {
-    const { connectToken } = await api("/pluggy/connect-token", { method: "POST" });
-    const pluggyConnect = new PluggyConnect({
-      connectToken,
-      includeSandbox: false, // false = só conectores reais (MeuPluggy e bancos); true mostra os bancos fake de teste
-      onSuccess: async (itemData) => {
-        try {
-          await api("/pluggy/items", {
-            method: "POST",
-            body: {
-              itemId: itemData.item.id,
-              cpf: pluggyPendingCpf,
-              institutionName: itemData.item.connector?.name || "Conta conectada"
-            }
-          });
-          await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
-          await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
-          renderScreen(currentScreen);
-        } catch (e) {
-          alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
+  // bolinhas no botão principal enquanto o servidor gera o token (na primeira vez pode demorar)
+  await withLoading(document.getElementById("btn-pluggy-connect"), async () => {
+    try {
+      const { connectToken } = await api("/pluggy/connect-token", { method: "POST" });
+      const pluggyConnect = new PluggyConnect({
+        connectToken,
+        includeSandbox: false, // false = só conectores reais (MeuPluggy e bancos); true mostra os bancos fake de teste
+        onSuccess: async (itemData) => {
+          showScreenLoader();
+          try {
+            await api("/pluggy/items", {
+              method: "POST",
+              body: {
+                itemId: itemData.item.id,
+                cpf: pluggyPendingCpf,
+                institutionName: itemData.item.connector?.name || "Conta conectada"
+              }
+            });
+            await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
+            await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
+            renderScreen(currentScreen);
+          } catch (e) {
+            alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
+          } finally {
+            hideScreenLoader();
+          }
+        },
+        onError: (error) => {
+          console.error("Erro no Pluggy Connect:", error);
+          alert("Não foi possível concluir a conexão com o banco.");
         }
-      },
-      onError: (error) => {
-        console.error("Erro no Pluggy Connect:", error);
-        alert("Não foi possível concluir a conexão com o banco.");
-      }
-    });
-    pluggyConnect.init();
-  } catch (e) {
-    alert("Erro ao iniciar conexão com o Pluggy: " + e.message);
-  }
+      });
+      pluggyConnect.init();
+    } catch (e) {
+      alert("Erro ao iniciar conexão com o Pluggy: " + e.message);
+    }
+  });
 }
 
 async function syncPluggyItem(itemId) {
@@ -850,7 +1054,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("btn-email-login").addEventListener("click", () => { setAuthMode("login"); openModal("modal-email"); });
     document.getElementById("link-create-account").addEventListener("click", (e) => { e.preventDefault(); setAuthMode("register"); openModal("modal-email"); });
-    document.getElementById("btn-do-email-login").addEventListener("click", async () => {
+    document.getElementById("btn-do-email-login").addEventListener("click", (e) => withLoading(e.currentTarget, async () => {
       clearAuthError();
       const name = document.getElementById("input-name").value.trim();
       const email = document.getElementById("input-email").value.trim();
@@ -865,7 +1069,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         showAuthError(err.message);
       }
-    });
+    }));
   }, "login por e-mail");
 
   wire(() => {
@@ -877,7 +1081,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   wire(() => {
     document.getElementById("cfg-modo-escuro").addEventListener("change", toggleTheme);
-    document.getElementById("btn-salvar-config").addEventListener("click", saveConfiguracoes);
+    document.getElementById("btn-salvar-config").addEventListener("click", (e) => withLoading(e.currentTarget, saveConfiguracoes));
   }, "configurações");
 
   wire(() => {
@@ -916,8 +1120,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("pluggy-items-list").addEventListener("click", (e) => {
       const syncBtn = e.target.closest("[data-pluggy-sync]");
       const removeBtn = e.target.closest("[data-pluggy-remove]");
-      if (syncBtn) syncPluggyItem(syncBtn.dataset.pluggySync);
-      if (removeBtn) removePluggyItem(removeBtn.dataset.pluggyRemove);
+      if (syncBtn) withLoading(syncBtn, () => syncPluggyItem(syncBtn.dataset.pluggySync), { minMs: 0 });
+      if (removeBtn) withLoading(removeBtn, () => removePluggyItem(removeBtn.dataset.pluggyRemove));
+    });
+    document.getElementById("cards-list").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-card-tx]");
+      if (!b) return;
+      txFilterBanco = b.dataset.cardTx; txVisibleCount = TX_PAGE_SIZE;
+      navigateTo("transacoes");
     });
   }, "pluggy");
 
@@ -936,7 +1146,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const alterarBtn = e.target.closest("#btn-alterar-categoria");
       const excluirBtn = e.target.closest("#btn-excluir-tx");
       if (alterarBtn) openCategoriaModal(alterarBtn.dataset.txId);
-      if (excluirBtn) { if (confirm("Excluir esta transação?")) deleteTx(excluirBtn.dataset.txId); }
+      if (excluirBtn) { if (confirm("Excluir esta transação?")) withLoading(excluirBtn, () => deleteTx(excluirBtn.dataset.txId)); }
     });
     document.getElementById("cat-grid").addEventListener("click", (e) => {
       const item = e.target.closest("[data-cat-id]");
@@ -945,7 +1155,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll("#cat-grid .cat-grid-item").forEach(el => el.classList.remove("selected"));
       item.classList.add("selected");
     });
-    document.getElementById("btn-salvar-categoria").addEventListener("click", saveCategoria);
+    document.getElementById("btn-salvar-categoria").addEventListener("click", (e) => withLoading(e.currentTarget, saveCategoria));
   }, "transações");
 
   wire(() => {
