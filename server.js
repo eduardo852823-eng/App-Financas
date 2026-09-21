@@ -266,6 +266,27 @@ async function getPluggyApiKey() {
   return data.apiKey;
 }
 
+// Busca TODAS as transações de uma conta no endpoint novo (GET /v2/transactions, paginação por cursor).
+// O endpoint antigo (GET /transactions) já responde HTTP 410.
+async function fetchAllPluggyTransactions(accountId, headers) {
+  const list = [];
+  let url = `${PLUGGY_BASE_URL}/v2/transactions?accountId=${accountId}`;
+  for (let page = 0; page < 50 && url; page++) {
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    list.push(...(data.results || []));
+    url = data.next ? `${PLUGGY_BASE_URL}/v2/transactions${data.next}` : null; // "next" já vem pronto, é só anexar
+  }
+  return list;
+}
+
+// Em cartão de crédito o Pluggy manda compra como valor positivo (aumenta a fatura)
+// e pagamento/estorno como negativo; no app compra é saída, então inverte o sinal.
+function pluggyValue(amount, accountType) {
+  return accountType === "CREDIT" ? -amount : amount;
+}
+
 // Gera um connect_token para o widget do Pluggy abrir no frontend.
 // itemId opcional: passa quando é uma reconexão/atualização de um item existente.
 app.post("/api/pluggy/connect-token", auth, h(async (req, res) => {
@@ -366,15 +387,17 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const statements = [];
   let transacoesProcessadas = 0;
   for (const acc of accounts) {
-    const txResp = await fetch(`${PLUGGY_BASE_URL}/transactions?accountId=${acc.id}&pageSize=500`, { headers });
-    if (!txResp.ok) {
-      contas.push({ nome: acc.name, tipo: acc.type, transacoes: 0, erro: `HTTP ${txResp.status}` });
+    let pluggyTx;
+    try {
+      pluggyTx = await fetchAllPluggyTransactions(acc.id, headers);
+    } catch (e) {
+      contas.push({ nome: acc.name, tipo: acc.type, transacoes: 0, erro: e.message });
       continue;
     }
-    const { results: pluggyTx } = await txResp.json();
     contas.push({ nome: acc.name, tipo: acc.type, transacoes: pluggyTx.length });
     for (const t of pluggyTx) {
       const desc = t.description || "Transação";
+      const value = pluggyValue(t.amount, acc.type);
       statements.push({
         sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category)
               SELECT ?,?,?,?,?,?,?
@@ -382,8 +405,8 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
                 SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND desc = ? AND value = ?
               )`,
         args: [
-          req.userId, t.date?.slice(0, 10), desc, item.item_id, t.amount, t.amount >= 0 ? "entrada" : "saida", categorize(desc),
-          req.userId, t.date?.slice(0, 10), desc, t.amount
+          req.userId, t.date?.slice(0, 10), desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
+          req.userId, t.date?.slice(0, 10), desc, value
         ]
       });
       transacoesProcessadas++;
@@ -426,11 +449,16 @@ async function syncAllPluggyItems() {
         const { results: accounts } = await accResp.json();
         const statements = [];
         for (const acc of accounts) {
-          const txResp = await fetch(`${PLUGGY_BASE_URL}/transactions?accountId=${acc.id}&pageSize=200`, { headers: { "X-API-KEY": apiKey } });
-          if (!txResp.ok) continue;
-          const { results: pluggyTx } = await txResp.json();
+          let pluggyTx;
+          try {
+            pluggyTx = await fetchAllPluggyTransactions(acc.id, { "X-API-KEY": apiKey });
+          } catch (e) {
+            console.error(`[pluggy-sync] transações da conta ${acc.id} falharam:`, e.message);
+            continue;
+          }
           for (const t of pluggyTx) {
             const desc = t.description || "Transação";
+            const value = pluggyValue(t.amount, acc.type);
             statements.push({
               sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category)
                     SELECT ?,?,?,?,?,?,?
@@ -438,8 +466,8 @@ async function syncAllPluggyItems() {
                       SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND desc = ? AND value = ?
                     )`,
               args: [
-                item.user_id, t.date?.slice(0, 10), desc, item.item_id, t.amount, t.amount >= 0 ? "entrada" : "saida", categorize(desc),
-                item.user_id, t.date?.slice(0, 10), desc, t.amount
+                item.user_id, t.date?.slice(0, 10), desc, item.item_id, value, value >= 0 ? "entrada" : "saida", categorize(desc),
+                item.user_id, t.date?.slice(0, 10), desc, value
               ]
             });
           }
