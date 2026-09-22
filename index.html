@@ -155,16 +155,6 @@
           </button>
         </div>
         <div class="review-banner hidden" id="tx-review-banner"></div>
-        <div class="filters-row filters-4 hidden" id="tx-filters-wrap">
-          <select id="tx-filter-periodo"><option value="all">Todo o período</option></select>
-          <select id="tx-filter-banco"><option value="all">Todos os bancos</option></select>
-          <select id="tx-filter-tipo">
-            <option value="all">Todos os tipos</option>
-            <option value="entrada">Entradas</option>
-            <option value="saida">Saídas</option>
-          </select>
-          <select id="tx-filter-categoria"><option value="all">Todas categorias</option></select>
-        </div>
         <div id="tx-list-container"></div>
       </section>
 
@@ -290,6 +280,32 @@
       <div class="modal-body">
         <div class="cat-grid" id="cat-grid"></div>
         <button class="btn btn-primary" id="btn-salvar-categoria">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== FILTRAR TRANSAÇÕES (modal) ===================== -->
+  <div class="modal-overlay" id="modal-filtros">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Filtrar transações</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="mini-lbl">Período</label>
+        <select id="tx-filter-periodo"><option value="all">Todo o período</option></select>
+        <label class="mini-lbl">Banco</label>
+        <select id="tx-filter-banco"><option value="all">Todos os bancos</option></select>
+        <label class="mini-lbl">Tipo</label>
+        <select id="tx-filter-tipo">
+          <option value="all">Todos os tipos</option>
+          <option value="entrada">Entradas</option>
+          <option value="saida">Saídas</option>
+        </select>
+        <label class="mini-lbl">Categoria</label>
+        <select id="tx-filter-categoria"><option value="all">Todas categorias</option></select>
+        <button class="btn btn-outline" id="btn-limpar-filtros" style="margin-top:10px">Limpar filtros</button>
+        <button class="btn btn-primary" id="btn-aplicar-filtros">Aplicar filtros</button>
       </div>
     </div>
   </div>

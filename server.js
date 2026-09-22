@@ -121,6 +121,16 @@ CREATE TABLE IF NOT EXISTS custom_categories (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS category_overrides (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  cat_id TEXT NOT NULL,
+  name TEXT,
+  icon TEXT,
+  color TEXT,
+  deleted INTEGER DEFAULT 0,
+  PRIMARY KEY (user_id, cat_id)
+);
+
 CREATE TABLE IF NOT EXISTS pluggy_accounts (
   account_id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -726,9 +736,19 @@ app.post("/api/me/visit", auth, h(async (req, res) => {
    CATEGORIAS PERSONALIZADAS
    ============================================================ */
 const CUSTOM_CAT_COLORS = ["#F59E0B","#3B82F6","#6366F1","#A855F7","#EC4899","#EF4444","#14B8A6","#0EA5E9","#10B981","#B45309"];
+// IDs que nunca podem ser apagados/renomeados (categoria "coringa" usada como destino
+// quando outra categoria é excluída, e o estado especial "não identificada").
+const PROTECTED_CAT_IDS = ["outros", "nao_identificada"];
+
 app.get("/api/categories", auth, h(async (req, res) => {
   const rows = await all("SELECT * FROM custom_categories WHERE user_id = ? ORDER BY id ASC", [req.userId]);
-  res.json(rows.map(r => ({ id: `custom_${r.id}`, name: r.name, icon: r.icon, color: r.color })));
+  const overrideRows = await all("SELECT * FROM category_overrides WHERE user_id = ?", [req.userId]);
+  const overrides = {};
+  overrideRows.forEach(o => { overrides[o.cat_id] = { name: o.name, icon: o.icon, color: o.color, deleted: !!o.deleted }; });
+  res.json({
+    custom: rows.map(r => ({ id: `custom_${r.id}`, name: r.name, icon: r.icon, color: r.color })),
+    overrides
+  });
 }));
 app.post("/api/categories", auth, h(async (req, res) => {
   const name = (req.body.name || "").trim();
@@ -739,9 +759,44 @@ app.post("/api/categories", auth, h(async (req, res) => {
   const r = await run("INSERT INTO custom_categories (user_id, name, icon, color) VALUES (?,?,?,?)", [req.userId, name, icon, color]);
   res.json({ id: `custom_${r.lastInsertRowid}`, name, icon, color });
 }));
+// Edita nome/emoji/cor de QUALQUER categoria — inclusive as padrão do sistema (via override
+// salvo por usuário; a categoria original não é alterada para os outros usuários).
+app.put("/api/categories/:id", auth, h(async (req, res) => {
+  const id = String(req.params.id);
+  const name = (req.body.name || "").trim();
+  const icon = (req.body.icon || "").trim();
+  const color = (req.body.color || "").trim();
+  if (!name || !icon) return res.status(400).json({ error: "Nome e emoji são obrigatórios." });
+  if (id.startsWith("custom_")) {
+    const rawId = id.replace(/^custom_/, "");
+    await run("UPDATE custom_categories SET name = ?, icon = ? WHERE id = ? AND user_id = ?", [name, icon, rawId, req.userId]);
+    return res.json({ ok: true });
+  }
+  await run(
+    `INSERT INTO category_overrides (user_id, cat_id, name, icon, color, deleted) VALUES (?,?,?,?,?,0)
+     ON CONFLICT(user_id, cat_id) DO UPDATE SET name = excluded.name, icon = excluded.icon, color = COALESCE(excluded.color, category_overrides.color), deleted = 0`,
+    [req.userId, id, name, icon, color || null]
+  );
+  res.json({ ok: true });
+}));
+// Exclui uma categoria — custom (apaga de vez) ou padrão do sistema (marca como excluída
+// só para esse usuário). Em ambos os casos, as transações que usavam essa categoria
+// passam para "Outros" em vez de sumir.
 app.delete("/api/categories/:id", auth, h(async (req, res) => {
-  const rawId = String(req.params.id).replace(/^custom_/, "");
-  await run("DELETE FROM custom_categories WHERE id = ? AND user_id = ?", [rawId, req.userId]);
+  const id = String(req.params.id);
+  if (PROTECTED_CAT_IDS.includes(id)) return res.status(400).json({ error: "Essa categoria não pode ser excluída." });
+  await run("UPDATE transactions SET category = 'outros' WHERE user_id = ? AND category = ?", [req.userId, id]);
+  await run("DELETE FROM category_rules WHERE user_id = ? AND category = ?", [req.userId, id]);
+  if (id.startsWith("custom_")) {
+    const rawId = id.replace(/^custom_/, "");
+    await run("DELETE FROM custom_categories WHERE id = ? AND user_id = ?", [rawId, req.userId]);
+  } else {
+    await run(
+      `INSERT INTO category_overrides (user_id, cat_id, deleted) VALUES (?,?,1)
+       ON CONFLICT(user_id, cat_id) DO UPDATE SET deleted = 1`,
+      [req.userId, id]
+    );
+  }
   res.json({ ok: true });
 }));
 
@@ -879,27 +934,12 @@ app.post("/api/pluggy/items", auth, h(async (req, res) => {
      ON CONFLICT(item_id) DO UPDATE SET status = 'UPDATED', last_sync = datetime('now')`,
     [req.userId, cpf, itemId, institutionName || null]
   );
-
-  // Evita duplicar: se já existia uma conexão do mesmo CPF + mesma instituição,
-  // a antiga é removida (a nova sincroniza o histórico completo).
-  if (institutionName) {
-    const dups = await all(
-      "SELECT * FROM pluggy_items WHERE user_id = ? AND cpf = ? AND institution_name = ? AND item_id != ?",
-      [req.userId, cpf, institutionName, itemId]
-    );
-    for (const dup of dups) {
-      // a conexão nova traz o histórico completo de novo, então o que veio da antiga é descartado
-      await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, dup.item_id]);
-      await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [dup.item_id]);
-      await run("DELETE FROM pluggy_items WHERE id = ?", [dup.id]);
-      try {
-        const apiKey = await getPluggyApiKey();
-        await fetch(`${PLUGGY_BASE_URL}/items/${dup.item_id}`, { method: "DELETE", headers: { "X-API-KEY": apiKey } });
-      } catch (e) {
-        console.error("Erro ao deletar item duplicado no Pluggy (seguindo mesmo assim):", e.message);
-      }
-    }
-  }
+  // OBS: aqui existia uma "limpeza de duplicados" que apagava qualquer conexão antiga
+  // com o mesmo CPF + mesmo nome de conector. Isso causava o bug de "banco some":
+  // como o conector do MeuPluggy tem o MESMO nome (ex.: "MeuPluggy") mesmo ao conectar
+  // bancos diferentes (Inter, depois Banco do Brasil), a conexão do banco anterior era
+  // identificada como "duplicada" e apagada por engano. Foi removida — cada item_id novo
+  // agora é sempre mantido como uma conexão própria.
   res.json({ ok: true });
 }));
 

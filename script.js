@@ -122,7 +122,8 @@ const state = {
   transactions: [],
   pluggyItems: [],
   accounts: [],
-  customCategories: []
+  customCategories: [],
+  categoryOverrides: {}
 };
 
 async function refreshMe() {
@@ -146,8 +147,14 @@ async function refreshPluggyItems() {
   catch (e) { state.pluggyItems = []; }
 }
 async function refreshCategories() {
-  try { state.customCategories = await api("/categories"); }
-  catch (e) { state.customCategories = []; }
+  try {
+    const r = await api("/categories");
+    state.customCategories = r.custom || [];
+    state.categoryOverrides = r.overrides || {};
+  } catch (e) {
+    state.customCategories = [];
+    state.categoryOverrides = {};
+  }
 }
 async function refreshAll() {
   await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts(), refreshCategories()]);
@@ -155,9 +162,20 @@ async function refreshAll() {
 // Todas as categorias disponíveis (fixas + criadas pelo usuário), sempre com
 // "Não identificada" por último.
 function allCategories() {
-  const fixed = CATEGORIES.filter(c => c.id !== "nao_identificada");
-  const last = CATEGORIES.find(c => c.id === "nao_identificada");
+  const ov = state.categoryOverrides || {};
+  const applyOverride = (c) => {
+    const o = ov[c.id];
+    if (!o) return c;
+    return { ...c, name: o.name || c.name, icon: o.icon || c.icon, color: o.color || c.color };
+  };
+  const fixed = CATEGORIES.filter(c => c.id !== "nao_identificada" && !(ov[c.id] && ov[c.id].deleted)).map(applyOverride);
+  const last = applyOverride(CATEGORIES.find(c => c.id === "nao_identificada"));
   return [...fixed, ...state.customCategories, last];
+}
+// Categorias editáveis/excluíveis na grade "Alterar categoria" — tudo, menos
+// "Outros" (destino de fallback) e "Não identificada" (estado especial, não é categoria de verdade).
+function editableCategories() {
+  return allCategories().filter(c => c.id !== "outros" && c.id !== "nao_identificada");
 }
 
 const PLUGGY_COLOR_PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#7C3AED", "#0891B2", "#DB2777"];
@@ -228,6 +246,7 @@ let catSegment = "gastos";
 let relSegment = "geral";
 let pendingCatTxId = null;
 let pendingCatSelected = null;
+let editingCatId = null;
 const TX_PAGE_SIZE = 10;
 let txVisibleCount = TX_PAGE_SIZE;
 
@@ -729,12 +748,24 @@ function openCategoriaModal(txId) {
   const t = state.transactions.find(x => x.id === Number(txId));
   pendingCatSelected = t ? effectiveCategory(t) : null;
   const grid = document.getElementById("cat-grid");
-  grid.innerHTML = allCategories().filter(c => c.id !== "salario" || (t && t.type === "entrada")).map(c => `
+  const cats = allCategories().filter(c => c.id !== "salario" || (t && t.type === "entrada"));
+  grid.innerHTML = cats.map(c => `
     <div class="cat-grid-item ${c.id === pendingCatSelected ? "selected" : ""}" data-cat-id="${c.id}">
+      ${c.id !== "outros" && c.id !== "nao_identificada" ? `
+        <div class="cat-grid-actions">
+          <button type="button" class="cat-mini-btn" data-edit-cat="${c.id}" title="Editar categoria">✎</button>
+          <button type="button" class="cat-mini-btn cat-mini-btn-danger" data-del-cat="${c.id}" title="Excluir categoria">🗑</button>
+        </div>
+      ` : ""}
       <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
       ${c.name}
     </div>
-  `).join("");
+  `).join("") + `
+    <div class="cat-grid-item cat-grid-add" id="cat-grid-add-btn">
+      <div class="cat-icon cat-icon-add">+</div>
+      Nova categoria
+    </div>
+  `;
   openModal("modal-categoria");
 }
 async function saveCategoria() {
@@ -923,6 +954,25 @@ function renderCategorias() {
   }).join("");
 }
 
+function openNovaCategoriaModal(editId) {
+  editingCatId = editId || null;
+  const titleEl = document.querySelector("#modal-nova-categoria h3");
+  const btnEl = document.getElementById("btn-salvar-nova-categoria");
+  if (editingCatId) {
+    const c = allCategories().find(x => x.id === editingCatId);
+    titleEl.textContent = "Editar categoria";
+    btnEl.textContent = "Salvar alterações";
+    document.getElementById("input-nova-cat-nome").value = c ? c.name : "";
+    document.getElementById("input-nova-cat-emoji").value = c ? c.icon : "";
+  } else {
+    titleEl.textContent = "Nova categoria";
+    btnEl.textContent = "Criar categoria";
+    document.getElementById("input-nova-cat-nome").value = "";
+    document.getElementById("input-nova-cat-emoji").value = "";
+  }
+  document.getElementById("nova-cat-error").classList.add("hidden");
+  openModal("modal-nova-categoria");
+}
 async function saveNovaCategoria() {
   const nome = document.getElementById("input-nova-cat-nome").value.trim();
   const emoji = document.getElementById("input-nova-cat-emoji").value.trim();
@@ -934,13 +984,34 @@ async function saveNovaCategoria() {
     return;
   }
   try {
-    await api("/categories", { method: "POST", body: { name: nome, icon: emoji } });
+    if (editingCatId) {
+      await api(`/categories/${editingCatId}`, { method: "PUT", body: { name: nome, icon: emoji } });
+    } else {
+      await api("/categories", { method: "POST", body: { name: nome, icon: emoji } });
+    }
+    editingCatId = null;
     await refreshCategories();
+    await refreshTransactions();
     closeAllModals();
-    renderScreen(currentScreen);
+    if (pendingCatTxId != null) openCategoriaModal(pendingCatTxId);
+    else renderScreen(currentScreen);
   } catch (e) {
-    errEl.textContent = e.message || "Não foi possível criar a categoria.";
+    errEl.textContent = e.message || "Não foi possível salvar a categoria.";
     errEl.classList.remove("hidden");
+  }
+}
+async function deleteCategoria(id) {
+  const c = allCategories().find(x => x.id === id);
+  if (!confirm(`Excluir a categoria "${c ? c.name : id}"? As transações dela passam para "Outros".`)) return;
+  try {
+    await api(`/categories/${id}`, { method: "DELETE" });
+    await refreshCategories();
+    await refreshTransactions();
+    if (pendingCatSelected === id) pendingCatSelected = "outros";
+    if (pendingCatTxId != null) openCategoriaModal(pendingCatTxId);
+    else renderScreen(currentScreen);
+  } catch (e) {
+    alert(e.message || "Não foi possível excluir a categoria.");
   }
 }
 
@@ -1420,9 +1491,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   wire(() => {
     document.getElementById("btn-toggle-filtros").addEventListener("click", (e) => {
-      const wrap = document.getElementById("tx-filters-wrap");
-      wrap.classList.toggle("hidden");
-      e.currentTarget.classList.toggle("active", !wrap.classList.contains("hidden"));
+      populateTxFilters();
+      openModal("modal-filtros");
+    });
+    document.getElementById("btn-aplicar-filtros").addEventListener("click", () => closeAllModals());
+    document.getElementById("btn-limpar-filtros").addEventListener("click", () => {
+      txFilterPeriodo = "all"; txFilterBanco = "all"; txFilterTipo = "all"; txFilterCategoria = "all";
+      txVisibleCount = TX_PAGE_SIZE;
+      populateTxFilters();
+      renderTransacoes();
     });
     document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-periodo").addEventListener("change", (e) => { txFilterPeriodo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
@@ -1442,6 +1519,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (excluirBtn) { if (confirm("Excluir esta transação?")) withLoading(excluirBtn, () => deleteTx(excluirBtn.dataset.txId)); }
     });
     document.getElementById("cat-grid").addEventListener("click", (e) => {
+      const editBtn = e.target.closest("[data-edit-cat]");
+      const delBtn = e.target.closest("[data-del-cat]");
+      const addBtn = e.target.closest("#cat-grid-add-btn");
+      if (editBtn) { openNovaCategoriaModal(editBtn.dataset.editCat); return; }
+      if (delBtn) { deleteCategoria(delBtn.dataset.delCat); return; }
+      if (addBtn) { openNovaCategoriaModal(null); return; }
       const item = e.target.closest("[data-cat-id]");
       if (!item) return;
       pendingCatSelected = item.dataset.catId;
@@ -1478,10 +1561,8 @@ document.addEventListener("DOMContentLoaded", () => {
       EMOJI_SUGGESTIONS.map(em => `<button type="button" data-emoji="${em}">${em}</button>`).join("");
     document.getElementById("btn-nova-categoria").addEventListener("click", (e) => {
       e.preventDefault();
-      document.getElementById("input-nova-cat-nome").value = "";
-      document.getElementById("input-nova-cat-emoji").value = "";
-      document.getElementById("nova-cat-error").classList.add("hidden");
-      openModal("modal-nova-categoria");
+      pendingCatTxId = null;
+      openNovaCategoriaModal(null);
     });
     document.getElementById("emoji-suggestions").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-emoji]");
