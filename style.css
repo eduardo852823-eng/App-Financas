@@ -415,11 +415,48 @@ a{text-decoration:none; color:inherit;}
 .profile-menu-sep{height:1px; background:var(--gray-100); margin:8px 0;}
 
 /* tx-meta agora também mostra a categoria */
-.tx-meta{display:flex; align-items:center; gap:4px; flex-wrap:wrap;}
+.tx-meta{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.tx-bank-name{font-size:10.5px; color:var(--text-secondary); font-weight:500;}
 .tx-cat-chip{
   display:inline-flex; align-items:center; gap:3px; background:var(--gray-100);
   padding:1px 7px; border-radius:20px; font-size:11px; font-weight:600; color:var(--text-secondary);
 }
+
+/* busca + botão de filtrar (Transações) */
+.search-row{display:flex; align-items:center; gap:8px; margin-bottom:14px;}
+.search-row .search-box{margin-bottom:0; flex:1;}
+.btn-filter-toggle{flex:none; background:var(--card-bg); box-shadow:var(--shadow);}
+.btn-filter-toggle.active{background:var(--blue); color:#fff;}
+#tx-filters-wrap{margin-top:0;}
+
+/* card clicável (entradas/saídas no início) */
+.card-clickable{cursor:pointer; transition:transform .15s ease;}
+.card-clickable:active{transform:scale(.97);}
+
+/* tela de detalhe de entradas/saídas, agrupada por banco */
+.es-bank-group{margin-bottom:16px;}
+.es-bank-head{display:flex; align-items:center; justify-content:space-between; padding:0 2px 8px;}
+.es-bank-name{display:flex; align-items:center; gap:10px; font-weight:700; font-size:13.5px; color:var(--navy);}
+.es-bank-name .tx-icon{width:28px; height:28px; font-size:11px; border-radius:8px;}
+.es-bank-total{font-weight:700; font-size:13.5px;}
+.es-bank-total.pos{color:var(--green);}
+.es-bank-total.neg{color:var(--red);}
+
+/* destaque de limites no cartão */
+.limit-highlight-row{display:flex; gap:10px; margin-bottom:10px;}
+.limit-highlight{flex:1; background:var(--bg-soft); border-radius:var(--radius-md); padding:10px 12px;}
+.limit-highlight-label{display:block; font-size:11px; color:var(--text-secondary); font-weight:600; margin-bottom:3px;}
+.limit-highlight-value{display:block; font-size:18px; font-weight:800; color:var(--navy);}
+
+/* picker de emoji para nova categoria */
+.emoji-picker-row{display:flex; flex-direction:column; gap:8px;}
+.emoji-picker-row input{font-size:20px; text-align:center;}
+.emoji-suggestions{display:flex; flex-wrap:wrap; gap:6px;}
+.emoji-suggestions button{
+  border:1.5px solid var(--gray-300); background:var(--bg-soft); border-radius:10px;
+  font-size:18px; width:38px; height:38px; cursor:pointer;
+}
+.emoji-suggestions button:hover{border-color:var(--blue);}
 
 /* estado de carregamento simples */
 .loading-state{text-align:center; padding:40px 20px; color:var(--text-secondary); font-size:14px;}
@@ -549,14 +586,14 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 }
 
 .review-banner{
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
   background:var(--card-bg); border:1.5px dashed var(--gray-300); border-radius:var(--radius-md);
-  padding:11px 14px; margin-bottom:14px; font-size:13.5px; color:var(--text-main);
+  padding:8px 12px; margin-bottom:12px; font-size:12px; color:var(--text-main);
 }
 .review-banner b{color:var(--navy);}
 .review-banner button{
   flex:none; border:none; cursor:pointer; background:var(--blue); color:#fff;
-  font-weight:600; font-size:13px; padding:8px 14px; border-radius:10px;
+  font-weight:600; font-size:11.5px; padding:6px 12px; border-radius:9px;
 }
 
 .rev-intro{text-align:center; padding:6px 0 2px;}

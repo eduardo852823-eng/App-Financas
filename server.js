@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS pluggy_items (
   last_sync TEXT
 );
 
+CREATE TABLE IF NOT EXISTS custom_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  icon TEXT NOT NULL,
+  color TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS pluggy_accounts (
   account_id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -711,6 +720,29 @@ app.post("/api/me/visit", auth, h(async (req, res) => {
   const u = await get("SELECT last_seen_at FROM users WHERE id = ?", [req.userId]);
   await run("UPDATE users SET last_seen_at = ? WHERE id = ?", [new Date().toISOString(), req.userId]);
   res.json({ previous: (u && u.last_seen_at) || null });
+}));
+
+/* ============================================================
+   CATEGORIAS PERSONALIZADAS
+   ============================================================ */
+const CUSTOM_CAT_COLORS = ["#F59E0B","#3B82F6","#6366F1","#A855F7","#EC4899","#EF4444","#14B8A6","#0EA5E9","#10B981","#B45309"];
+app.get("/api/categories", auth, h(async (req, res) => {
+  const rows = await all("SELECT * FROM custom_categories WHERE user_id = ? ORDER BY id ASC", [req.userId]);
+  res.json(rows.map(r => ({ id: `custom_${r.id}`, name: r.name, icon: r.icon, color: r.color })));
+}));
+app.post("/api/categories", auth, h(async (req, res) => {
+  const name = (req.body.name || "").trim();
+  const icon = (req.body.icon || "").trim();
+  if (!name || !icon) return res.status(400).json({ error: "Nome e emoji são obrigatórios." });
+  const countRow = await get("SELECT COUNT(*) as n FROM custom_categories WHERE user_id = ?", [req.userId]);
+  const color = CUSTOM_CAT_COLORS[Number(countRow.n) % CUSTOM_CAT_COLORS.length];
+  const r = await run("INSERT INTO custom_categories (user_id, name, icon, color) VALUES (?,?,?,?)", [req.userId, name, icon, color]);
+  res.json({ id: `custom_${r.lastInsertRowid}`, name, icon, color });
+}));
+app.delete("/api/categories/:id", auth, h(async (req, res) => {
+  const rawId = String(req.params.id).replace(/^custom_/, "");
+  await run("DELETE FROM custom_categories WHERE id = ? AND user_id = ?", [rawId, req.userId]);
+  res.json({ ok: true });
 }));
 
 /* ============================================================

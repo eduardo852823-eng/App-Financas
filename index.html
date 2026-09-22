@@ -97,11 +97,11 @@
         </div>
 
         <div class="row-cards">
-          <div class="card card-mini card-green">
+          <div class="card card-mini card-green card-clickable" id="btn-ver-entradas">
             <span class="mini-label">↑ Entradas</span>
             <span class="mini-value" id="total-entradas">R$ 0,00</span>
           </div>
-          <div class="card card-mini card-red">
+          <div class="card card-mini card-red card-clickable" id="btn-ver-saidas">
             <span class="mini-label">↓ Saídas</span>
             <span class="mini-value" id="total-saidas">R$ 0,00</span>
           </div>
@@ -125,6 +125,11 @@
 
       </section>
 
+      <!-- ---------- ENTRADAS / SAÍDAS (detalhe) ---------- -->
+      <section class="screen screen-entradas-saidas" data-screen="entradas-saidas">
+        <div id="es-list-container"></div>
+      </section>
+
       <!-- ---------- BANCOS ---------- -->
       <section class="screen screen-bancos" data-screen="bancos">
         <p class="subtext">Conecte seus bancos e acompanhe tudo em um só lugar.</p>
@@ -140,12 +145,17 @@
 
       <!-- ---------- TRANSAÇÕES ---------- -->
       <section class="screen screen-transacoes" data-screen="transacoes">
-        <div class="search-box">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input type="text" id="search-transacoes" placeholder="Buscar transações...">
+        <div class="search-row">
+          <div class="search-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="search-transacoes" placeholder="Buscar transações...">
+          </div>
+          <button class="icon-btn btn-filter-toggle" id="btn-toggle-filtros" title="Filtrar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          </button>
         </div>
         <div class="review-banner hidden" id="tx-review-banner"></div>
-        <div class="filters-row filters-4">
+        <div class="filters-row filters-4 hidden" id="tx-filters-wrap">
           <select id="tx-filter-periodo"><option value="all">Todo o período</option></select>
           <select id="tx-filter-banco"><option value="all">Todos os bancos</option></select>
           <select id="tx-filter-tipo">
@@ -160,6 +170,10 @@
 
       <!-- ---------- CATEGORIAS ---------- -->
       <section class="screen screen-categorias" data-screen="categorias">
+        <div class="section-head">
+          <h3>Categorias</h3>
+          <a href="#" class="link-small" id="btn-nova-categoria">+ Nova categoria</a>
+        </div>
         <div class="segmented" id="cat-segmented">
           <button class="seg-btn active" data-seg="gastos">Gastos</button>
           <button class="seg-btn" data-seg="ganhos">Ganhos</button>
@@ -276,6 +290,27 @@
       <div class="modal-body">
         <div class="cat-grid" id="cat-grid"></div>
         <button class="btn btn-primary" id="btn-salvar-categoria">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== NOVA CATEGORIA (modal) ===================== -->
+  <div class="modal-overlay" id="modal-nova-categoria">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Nova categoria</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Emoji</label>
+        <div class="emoji-picker-row">
+          <input type="text" id="input-nova-cat-emoji" placeholder="🐾" maxlength="4">
+          <div class="emoji-suggestions" id="emoji-suggestions"></div>
+        </div>
+        <label>Nome</label>
+        <input type="text" id="input-nova-cat-nome" placeholder="Ex: Pets" maxlength="24">
+        <div class="form-error hidden" id="nova-cat-error"></div>
+        <button class="btn btn-primary" id="btn-salvar-nova-categoria">Criar categoria</button>
       </div>
     </div>
   </div>

@@ -26,7 +26,7 @@ const CATEGORIES = [
   { id: "salario", name: "Salário", color: "#16A34A", icon: "💰" },
   { id: "nao_identificada", name: "Não identificada", color: "#CBD5E1", icon: "❓" }
 ];
-function catInfo(id) { return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1]; }
+function catInfo(id) { return allCategories().find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1]; }
 function fmtBRL(v) {
   const sign = v < 0 ? "-" : "";
   return sign + "R$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -121,7 +121,8 @@ const state = {
   preferences: { theme: "light", currency: "BRL" },
   transactions: [],
   pluggyItems: [],
-  accounts: []
+  accounts: [],
+  customCategories: []
 };
 
 async function refreshMe() {
@@ -144,8 +145,19 @@ async function refreshPluggyItems() {
   try { state.pluggyItems = await api("/pluggy/items"); }
   catch (e) { state.pluggyItems = []; }
 }
+async function refreshCategories() {
+  try { state.customCategories = await api("/categories"); }
+  catch (e) { state.customCategories = []; }
+}
 async function refreshAll() {
-  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts()]);
+  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts(), refreshCategories()]);
+}
+// Todas as categorias disponíveis (fixas + criadas pelo usuário), sempre com
+// "Não identificada" por último.
+function allCategories() {
+  const fixed = CATEGORIES.filter(c => c.id !== "nao_identificada");
+  const last = CATEGORIES.find(c => c.id === "nao_identificada");
+  return [...fixed, ...state.customCategories, last];
 }
 
 const PLUGGY_COLOR_PALETTE = ["#2563EB", "#16A34A", "#EA580C", "#7C3AED", "#0891B2", "#DB2777"];
@@ -172,12 +184,12 @@ function connectedBanks() {
     type: a.type, balance: a.balance, connected: true
   }));
 }
-function instInfo(id) {
+function instInfo(id, fallbackName) {
   const acc = connectedBanks().find(b => b.id === id);
   if (acc) return acc;
   const pluggy = state.pluggyItems.find(p => p.item_id === id);
   if (pluggy) return { id, name: pluggy.institution_name || "Conta conectada", color: pluggyColorFor(id), connected: true };
-  return { name: id, color: "#94A3B8" };
+  return { name: prettyName(fallbackName) || "Conta", color: "#94A3B8" };
 }
 function isCreditTx(t) { return t.account_type === "CREDIT"; }
 function bankAccountsOnly() { return connectedBanks().filter(b => b.type !== "CREDIT"); }
@@ -211,6 +223,7 @@ let txFilterPeriodo = "all";
 let txFilterBanco = "all";
 let txFilterTipo = "all";
 let txFilterCategoria = "all";
+let esTipo = "entrada";
 let catSegment = "gastos";
 let relSegment = "geral";
 let pendingCatTxId = null;
@@ -270,8 +283,10 @@ function navigateTo(screen, { refresh = true } = {}) {
     target.classList.add("active");
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === screen));
-  const titles = { inicio: "Início", bancos: "Minhas instituições", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios" };
+  const titles = { inicio: "Início", bancos: "Minhas instituições", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   document.getElementById("topbar-title").textContent = titles[screen] || "";
+  const backBtn = document.getElementById("btn-back");
+  if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas");
   renderScreen(screen);
   document.getElementById("content").scrollTop = 0;
   loadScreenData(screen, refresh);
@@ -297,6 +312,7 @@ function renderScreen(screen) {
   if (screen === "inicio") renderDashboard();
   if (screen === "bancos") renderBancos();
   if (screen === "transacoes") renderTransacoes();
+  if (screen === "entradas-saidas") renderEntradasSaidas();
   if (screen === "categorias") renderCategorias();
   if (screen === "relatorios") renderRelatorios();
 }
@@ -402,6 +418,42 @@ function renderDashboard() {
   renderCards();
 }
 
+function openEntradasSaidas(tipo) {
+  esTipo = tipo;
+  navigateTo("entradas-saidas", { refresh: false });
+}
+function renderEntradasSaidas() {
+  const tipo = esTipo;
+  document.getElementById("topbar-title").textContent = tipo === "entrada" ? "Entradas" : "Saídas";
+  const txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
+    .filter(t => !isCreditTx(t) && t.type === tipo)
+    .sort((a,b) => b.date.localeCompare(a.date));
+  const container = document.getElementById("es-list-container");
+  if (!txs.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma ${tipo === "entrada" ? "entrada" : "saída"} no período.</div>`;
+    return;
+  }
+  const groups = {};
+  txs.forEach(t => {
+    const info = instInfo(t.bank_id, t.account_name);
+    const key = info.name;
+    if (!groups[key]) groups[key] = { info, items: [], total: 0 };
+    groups[key].items.push(t);
+    groups[key].total += Math.abs(t.value);
+  });
+  const names = Object.keys(groups).sort((a,b) => groups[b].total - groups[a].total);
+  container.innerHTML = names.map(name => {
+    const g = groups[name];
+    return `<div class="es-bank-group">
+      <div class="es-bank-head">
+        <div class="es-bank-name"><span class="tx-icon" style="background:${g.info.color}">${initials(name)}</span>${esc(name)}</div>
+        <div class="es-bank-total ${tipo === "entrada" ? "pos" : "neg"}">${tipo === "entrada" ? "+ " : "- "}${fmtBRL(g.total)}</div>
+      </div>
+      ${g.items.map(t => txRowHtml(t)).join("")}
+    </div>`;
+  }).join("");
+}
+
 /* ============================================================
    CARTÕES DE CRÉDITO (seção própria, com tudo que o Pluggy traz)
    ============================================================ */
@@ -452,9 +504,16 @@ function cardHtml(a) {
     </div>
     <div class="credit-card-body">
       ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>` : ""}
-      ${kvRow("Limite usado", money(used))}
-      ${kvRow("Limite disponível", money(avail))}
-      ${kvRow("Limite total", money(limit))}
+      <div class="limit-highlight-row">
+        <div class="limit-highlight">
+          <span class="limit-highlight-label">Limite disponível</span>
+          <span class="limit-highlight-value">${money(avail) || "—"}</span>
+        </div>
+        <div class="limit-highlight">
+          <span class="limit-highlight-label">Limite total</span>
+          <span class="limit-highlight-value">${money(limit) || "—"}</span>
+        </div>
+      </div>
       ${bill
         ? kvRow(`Fatura (vence ${fmtDate(bill.dueDate) || "—"})`, money(bill.totalAmount))
         : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate)))}
@@ -463,6 +522,7 @@ function cardHtml(a) {
       ${kvRow("Compras registradas nas transações", money(spent))}
       <details class="card-details">
         <summary>Ver todos os dados</summary>
+        ${kvRow("Limite usado", money(used))}
         ${kvRow("Nome", esc(d.name))}
         ${kvRow("Nome comercial", esc(d.marketingName))}
         ${kvRow("Titular", esc(d.owner))}
@@ -583,7 +643,7 @@ function populateTxFilters() {
 
   const catSel = document.getElementById("tx-filter-categoria");
   catSel.innerHTML = `<option value="all">Todas categorias</option>` +
-    CATEGORIES.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join("");
+    allCategories().map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join("");
   catSel.value = txFilterCategoria;
 }
 
@@ -616,7 +676,7 @@ function renderTransacoes() {
 }
 
 function txRowHtml(t) {
-  const info = instInfo(t.bank_id);
+  const info = instInfo(t.bank_id, t.account_name);
   const cat = catInfo(effectiveCategory(t));
   const isPos = t.value >= 0;
   return `<div class="tx-row" data-tx-id="${t.id}">
@@ -625,7 +685,7 @@ function txRowHtml(t) {
       <div>
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
-          <span>${esc(info.name)} • ${isPos ? "Entrada" : "Saída"}</span>
+          <span class="tx-bank-name">${esc(info.name)}</span>
           <span class="tx-cat-chip"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${cat.name}${isGuess(t) ? " ✨" : ""}</span>
         </div>
       </div>
@@ -637,7 +697,7 @@ function txRowHtml(t) {
 function openTxDetalhe(id) {
   const t = state.transactions.find(x => x.id === Number(id));
   if (!t) return;
-  const info = instInfo(t.bank_id);
+  const info = instInfo(t.bank_id, t.account_name);
   const cat = catInfo(effectiveCategory(t));
   const isPos = t.value >= 0;
   const dateFmt = t.date.split("-").reverse().join("/");
@@ -669,7 +729,7 @@ function openCategoriaModal(txId) {
   const t = state.transactions.find(x => x.id === Number(txId));
   pendingCatSelected = t ? effectiveCategory(t) : null;
   const grid = document.getElementById("cat-grid");
-  grid.innerHTML = CATEGORIES.filter(c => c.id !== "salario" || (t && t.type === "entrada")).map(c => `
+  grid.innerHTML = allCategories().filter(c => c.id !== "salario" || (t && t.type === "entrada")).map(c => `
     <div class="cat-grid-item ${c.id === pendingCatSelected ? "selected" : ""}" data-cat-id="${c.id}">
       <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
       ${c.name}
@@ -861,6 +921,27 @@ function renderCategorias() {
       <div class="cat-amount">${fmtBRL(val)}</div>
     </div>`;
   }).join("");
+}
+
+async function saveNovaCategoria() {
+  const nome = document.getElementById("input-nova-cat-nome").value.trim();
+  const emoji = document.getElementById("input-nova-cat-emoji").value.trim();
+  const errEl = document.getElementById("nova-cat-error");
+  errEl.classList.add("hidden");
+  if (!nome || !emoji) {
+    errEl.textContent = "Escolha um emoji e um nome para a categoria.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  try {
+    await api("/categories", { method: "POST", body: { name: nome, icon: emoji } });
+    await refreshCategories();
+    closeAllModals();
+    renderScreen(currentScreen);
+  } catch (e) {
+    errEl.textContent = e.message || "Não foi possível criar a categoria.";
+    errEl.classList.remove("hidden");
+  }
 }
 
 /* ============================================================
@@ -1307,7 +1388,17 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("filter-periodo").addEventListener("change", (e) => { dashFilterPeriodo = e.target.value; renderDashboard(); });
     document.getElementById("filter-banco").addEventListener("change", (e) => { dashFilterBanco = e.target.value; renderDashboard(); });
+    document.getElementById("btn-ver-entradas").addEventListener("click", () => openEntradasSaidas("entrada"));
+    document.getElementById("btn-ver-saidas").addEventListener("click", () => openEntradasSaidas("saida"));
   }, "filtros do dashboard");
+
+  wire(() => {
+    document.getElementById("btn-back").addEventListener("click", () => navigateTo("inicio"));
+    document.getElementById("es-list-container").addEventListener("click", (e) => {
+      const row = e.target.closest("[data-tx-id]");
+      if (row) openTxDetalhe(row.dataset.txId);
+    });
+  }, "entradas/saídas");
 
   wire(() => {
     document.getElementById("btn-pluggy-connect").addEventListener("click", openPluggyCpfModal);
@@ -1328,6 +1419,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }, "pluggy");
 
   wire(() => {
+    document.getElementById("btn-toggle-filtros").addEventListener("click", (e) => {
+      const wrap = document.getElementById("tx-filters-wrap");
+      wrap.classList.toggle("hidden");
+      e.currentTarget.classList.toggle("active", !wrap.classList.contains("hidden"));
+    });
     document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-periodo").addEventListener("change", (e) => { txFilterPeriodo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-banco").addEventListener("change", (e) => { txFilterBanco = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
@@ -1375,6 +1471,24 @@ document.addEventListener("DOMContentLoaded", () => {
       renderCategorias();
     });
   }, "categorias");
+
+  wire(() => {
+    const EMOJI_SUGGESTIONS = ["🐾","🏠","🎁","🧴","🎮","📱","💇","🧾","🎵","🧸","⚽","🌱"];
+    document.getElementById("emoji-suggestions").innerHTML =
+      EMOJI_SUGGESTIONS.map(em => `<button type="button" data-emoji="${em}">${em}</button>`).join("");
+    document.getElementById("btn-nova-categoria").addEventListener("click", (e) => {
+      e.preventDefault();
+      document.getElementById("input-nova-cat-nome").value = "";
+      document.getElementById("input-nova-cat-emoji").value = "";
+      document.getElementById("nova-cat-error").classList.add("hidden");
+      openModal("modal-nova-categoria");
+    });
+    document.getElementById("emoji-suggestions").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-emoji]");
+      if (btn) document.getElementById("input-nova-cat-emoji").value = btn.dataset.emoji;
+    });
+    document.getElementById("btn-salvar-nova-categoria").addEventListener("click", (e) => withLoading(e.currentTarget, saveNovaCategoria));
+  }, "nova categoria");
 
   wire(() => {
     document.getElementById("rel-segmented").addEventListener("click", (e) => {
