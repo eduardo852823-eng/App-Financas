@@ -1135,9 +1135,20 @@ function maskCpf(cpf) {
 let pluggyPendingCpf = null;
 
 function openPluggyCpfModal() {
-  document.getElementById("input-pluggy-cpf").value = "";
+  const cpfInput = document.getElementById("input-pluggy-cpf");
+  cpfInput.value = "";
   document.getElementById("pluggy-error").classList.add("hidden");
   openModal("modal-pluggy-cpf");
+}
+
+// Formata o CPF enquanto o usuário digita: 000.000.000-00
+function formatCpfInput(el) {
+  let digits = el.value.replace(/\D/g, "").slice(0, 11);
+  let out = digits.slice(0, 3);
+  if (digits.length > 3) out += "." + digits.slice(3, 6);
+  if (digits.length > 6) out += "." + digits.slice(6, 9);
+  if (digits.length > 9) out += "-" + digits.slice(9, 11);
+  el.value = out;
 }
 
 async function startPluggyConnect() {
@@ -1300,6 +1311,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   wire(() => {
     document.getElementById("btn-pluggy-connect").addEventListener("click", openPluggyCpfModal);
+    document.getElementById("input-pluggy-cpf").addEventListener("input", (e) => formatCpfInput(e.target));
     document.getElementById("btn-pluggy-continuar").addEventListener("click", startPluggyConnect);
     document.getElementById("pluggy-items-list").addEventListener("click", (e) => {
       const syncBtn = e.target.closest("[data-pluggy-sync]");
