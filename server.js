@@ -1063,6 +1063,26 @@ async function syncPluggyItemData(item, headers) {
 
 // Sincroniza um item sob demanda (botão "Sincronizar").
 // Devolve também um diagnóstico (status da conexão, contas e nº de transações por conta).
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Logo depois que o item é criado no Pluggy, ele fica processando (status UPDATING) por
+// alguns segundos antes de ter contas disponíveis. Se a gente chamar /accounts nesse meio
+// tempo, volta vazio — e o app mostrava "Nenhuma conta carregada ainda" mesmo com a conexão
+// certinha. Aqui a gente espera o item sair de UPDATING (ou tenta de novo algumas vezes,
+// mesmo sem confirmação, já que às vezes as contas já existem antes do status mudar).
+async function waitPluggyItemReady(itemId, headers, { attempts = 5, delayMs = 2500 } = {}) {
+  let itemInfo = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await fetch(`${PLUGGY_BASE_URL}/items/${itemId}`, { headers });
+      if (r.ok) itemInfo = await r.json();
+    } catch (e) { /* segue tentando */ }
+    if (itemInfo && itemInfo.status !== "UPDATING") break;
+    if (i < attempts - 1) await sleep(delayMs);
+  }
+  return itemInfo;
+}
+
 app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE item_id = ? AND user_id = ?", [req.params.itemId, req.userId]);
   if (!item) return res.status(404).json({ error: "Conexão não encontrada" });
@@ -1070,15 +1090,18 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const apiKey = await getPluggyApiKey();
   const headers = { "X-API-KEY": apiKey };
 
-  let itemInfo = null;
-  try {
-    const r = await fetch(`${PLUGGY_BASE_URL}/items/${item.item_id}`, { headers });
-    if (r.ok) itemInfo = await r.json();
-  } catch (e) { /* segue sem o status */ }
+  // espera a conexão terminar de processar no Pluggy antes de buscar as contas
+  const itemInfo = await waitPluggyItemReady(item.item_id, headers);
 
   let result;
   try {
     result = await syncPluggyItemData(item, headers);
+    // se ainda não veio nenhuma conta e o item ainda tá processando, tenta mais uma vez
+    // depois de um respiro — cobre o caso raro de demorar mais que o normal
+    if (!result.accounts.length && itemInfo && itemInfo.status === "UPDATING") {
+      await sleep(3000);
+      result = await syncPluggyItemData(item, headers);
+    }
   } catch (e) {
     return res.status(502).json({ error: e.message });
   }

@@ -247,6 +247,7 @@ let relSegment = "geral";
 let pendingCatTxId = null;
 let pendingCatSelected = null;
 let editingCatId = null;
+let novaCatOrigin = null; // "review" | null — de onde o modal "Nova categoria" foi aberto, pra saber pra onde voltar depois de salvar
 const TX_PAGE_SIZE = 10;
 let txVisibleCount = TX_PAGE_SIZE;
 
@@ -480,25 +481,7 @@ function kvRow(label, valueHtml) {
   if (valueHtml === null || valueHtml === undefined || valueHtml === "") return "";
   return `<div class="kv-row"><span>${esc(label)}</span><span>${valueHtml}</span></div>`;
 }
-const CARD_STATUS = { ACTIVE: "Ativo", BLOCKED: "Bloqueado", CANCELLED: "Cancelado", INACTIVE: "Inativo" };
-const CARD_HOLDER = { MAIN: "Titular", ADDITIONAL: "Adicional" };
-const CARD_KNOWN = new Set(["id", "type", "subtype", "name", "marketingName", "taxNumber", "owner", "number", "balance", "itemId", "currencyCode", "creditData"]);
-const CREDIT_KNOWN = new Set(["level", "brand", "balanceCloseDate", "balanceDueDate", "availableCreditLimit", "creditLimit", "isLimitFlexible", "balanceForeignCurrency", "minimumPayment", "status", "holderType"]);
 const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
-const yesNo = (v) => (v === true ? "Sim" : v === false ? "Não" : null);
-
-function billHtml(b) {
-  const pays = (b.payments || []).reduce((s, p) => s + (num(p.amount) || 0), 0);
-  const charges = (b.financeCharges || []).reduce((s, p) => s + (num(p.amount) || 0), 0);
-  return `<div class="bill-item">
-    <div class="bill-head"><b>Vence em ${esc(fmtDate(b.dueDate) || "—")}</b><span>${money(b.totalAmount) || "—"}</span></div>
-    ${kvRow("Fechamento", esc(fmtDate(b.billClosingDate)))}
-    ${kvRow("Pagamento mínimo", money(b.minimumPaymentAmount))}
-    ${kvRow("Parcelamento", yesNo(b.allowsInstallments) === null ? null : (b.allowsInstallments ? "Permitido" : "Não permitido"))}
-    ${kvRow("Pagamentos feitos", (b.payments || []).length ? `${fmtBRL(pays)} (${b.payments.length})` : null)}
-    ${kvRow("Encargos", (b.financeCharges || []).length ? fmtBRL(charges) : null)}
-  </div>`;
-}
 
 function cardHtml(a) {
   const d = a.data || {};
@@ -511,10 +494,6 @@ function cardHtml(a) {
   const bill = bills[0];
   const spent = -state.transactions.filter(t => t.bank_id === a.account_id).reduce((s, t) => s + t.value, 0);
   const sub = [c.brand, c.level].filter(Boolean).map(esc).join(" ") + (d.number ? ` • final ${esc(d.number)}` : "");
-  const extras = [
-    ...Object.entries(d).filter(([k, v]) => !CARD_KNOWN.has(k) && v !== null && typeof v !== "object"),
-    ...Object.entries(c).filter(([k, v]) => !CREDIT_KNOWN.has(k) && v !== null && typeof v !== "object")
-  ];
 
   return `<div class="credit-card-item">
     <div class="credit-card-top" style="background:${color}">
@@ -539,29 +518,6 @@ function cardHtml(a) {
       ${kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))}
       ${kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment))}
       ${kvRow("Compras registradas nas transações", money(spent))}
-      <details class="card-details">
-        <summary>Ver todos os dados</summary>
-        ${kvRow("Limite usado", money(used))}
-        ${kvRow("Nome", esc(d.name))}
-        ${kvRow("Nome comercial", esc(d.marketingName))}
-        ${kvRow("Titular", esc(d.owner))}
-        ${kvRow("CPF do titular", esc(d.taxNumber))}
-        ${kvRow("Cartão", d.number ? `final ${esc(d.number)}` : null)}
-        ${kvRow("Bandeira", esc(c.brand))}
-        ${kvRow("Nível", esc(c.level))}
-        ${kvRow("Situação", esc(CARD_STATUS[c.status] || c.status))}
-        ${kvRow("Tipo de titular", esc(CARD_HOLDER[c.holderType] || c.holderType))}
-        ${kvRow("Limite flexível", yesNo(c.isLimitFlexible))}
-        ${kvRow("Moeda", esc(d.currencyCode))}
-        ${kvRow("Saldo informado pelo banco", money(a.balance))}
-        ${kvRow("Saldo em moeda estrangeira", money(c.balanceForeignCurrency))}
-        ${kvRow("Vencimento (conta)", esc(fmtDate(c.balanceDueDate)))}
-        ${kvRow("Fechamento (conta)", esc(fmtDate(c.balanceCloseDate)))}
-        ${kvRow("Pagamento mínimo (conta)", money(c.minimumPayment))}
-        ${extras.map(([k, v]) => kvRow(k, esc(v))).join("")}
-        ${kvRow("Atualizado em", esc(fmtDateTime(a.updated_at)))}
-        ${bills.length ? `<div class="card-details-title">Faturas</div>${bills.slice(0, 6).map(billHtml).join("")}` : ""}
-      </details>
       <button class="btn-connect card-tx-btn" data-card-tx="${esc(a.account_id)}">Ver transações do cartão</button>
     </div>
   </div>`;
@@ -872,6 +828,10 @@ function renderReviewStep() {
     </div>
     <div class="cat-grid" id="rev-grid">
       ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${c.id}"><div class="cat-icon" style="background:${c.color}">${c.icon}</div>${c.name}</div>`).join("")}
+      <div class="cat-grid-item cat-grid-add" id="rev-grid-add-btn">
+        <div class="cat-icon cat-icon-add">+</div>
+        Nova categoria
+      </div>
     </div>
     <div class="rev-actions">
       ${t.category === "nao_identificada"
@@ -993,8 +953,15 @@ async function saveNovaCategoria() {
     await refreshCategories();
     await refreshTransactions();
     closeAllModals();
-    if (pendingCatTxId != null) openCategoriaModal(pendingCatTxId);
-    else renderScreen(currentScreen);
+    if (novaCatOrigin === "review") {
+      novaCatOrigin = null;
+      openModal("modal-revisao");
+      renderReviewStep();
+    } else if (pendingCatTxId != null) {
+      openCategoriaModal(pendingCatTxId);
+    } else {
+      renderScreen(currentScreen);
+    }
   } catch (e) {
     errEl.textContent = e.message || "Não foi possível salvar a categoria.";
     errEl.classList.remove("hidden");
@@ -1338,9 +1305,20 @@ async function startPluggyConnect() {
                 institutionName: itemData.item.connector?.name || "Conta conectada"
               }
             });
-            await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
+            // logo após conectar, o Pluggy pode levar alguns segundos para deixar as contas
+            // prontas (status "UPDATING"). O servidor já espera um pouco, mas se ainda assim
+            // vier vazio, tenta de novo silenciosamente antes de desistir e mostrar "conectado".
+            let r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
+            for (let tent = 0; !r.contasEncontradas && tent < 3; tent++) {
+              await new Promise(res => setTimeout(res, 3000));
+              try { r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" }); }
+              catch (e) { break; }
+            }
             await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
             renderScreen(currentScreen);
+            if (!r.contasEncontradas) {
+              alert("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
+            }
           } catch (e) {
             alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
           } finally {
@@ -1522,9 +1500,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const editBtn = e.target.closest("[data-edit-cat]");
       const delBtn = e.target.closest("[data-del-cat]");
       const addBtn = e.target.closest("#cat-grid-add-btn");
-      if (editBtn) { openNovaCategoriaModal(editBtn.dataset.editCat); return; }
+      if (editBtn) { novaCatOrigin = null; openNovaCategoriaModal(editBtn.dataset.editCat); return; }
       if (delBtn) { deleteCategoria(delBtn.dataset.delCat); return; }
-      if (addBtn) { openNovaCategoriaModal(null); return; }
+      if (addBtn) { novaCatOrigin = null; openNovaCategoriaModal(null); return; }
       const item = e.target.closest("[data-cat-id]");
       if (!item) return;
       pendingCatSelected = item.dataset.catId;
@@ -1534,6 +1512,8 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-salvar-categoria").addEventListener("click", (e) => withLoading(e.currentTarget, saveCategoria));
     document.getElementById("tx-review-banner").addEventListener("click", (e) => { if (e.target.closest("#btn-open-revisao")) startUnidentifiedReview(); });
     document.getElementById("revisao-body").addEventListener("click", (e) => {
+      const addBtn = e.target.closest("#rev-grid-add-btn");
+      if (addBtn) { novaCatOrigin = "review"; openNovaCategoriaModal(null); return; }
       const cat = e.target.closest("[data-rev-cat]");
       if (cat) return reviewPick(cat.dataset.revCat);
       const act = e.target.closest("[data-rev]");
@@ -1562,6 +1542,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-nova-categoria").addEventListener("click", (e) => {
       e.preventDefault();
       pendingCatTxId = null;
+      novaCatOrigin = null;
       openNovaCategoriaModal(null);
     });
     document.getElementById("emoji-suggestions").addEventListener("click", (e) => {
