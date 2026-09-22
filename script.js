@@ -400,15 +400,6 @@ function renderDashboard() {
   }).join("") || `<div class="empty-state">Nenhum banco conectado ainda.</div>`;
 
   renderCards();
-
-  const saidasTx = txs.filter(t => t.type === "saida");
-  const byCat = {};
-  saidasTx.forEach(t => {
-    const c = effectiveCategory(t);
-    byCat[c] = (byCat[c] || 0) + Math.abs(t.value);
-  });
-  drawDonut("donut-chart", byCat, saidas);
-  renderLegend("donut-legend", byCat, saidas);
 }
 
 /* ============================================================

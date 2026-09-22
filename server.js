@@ -400,8 +400,11 @@ function predictModel(model, desc, minPosterior = 0.85) {
    opts.model   -> modelo do usuário (buildModel)
    opts.cache   -> Map(chave -> categoria) respondida pelo Claude
    Devolve { cat, source } — source: learned | rule | pluggy | model | llm | null           */
+// Pix/TED/transferência recebido só vira "salário" se o valor for maior que isso (ajustável por env var).
+const SALARY_MIN_VALUE = Number(process.env.SALARY_MIN_VALUE) || 1000;
+
 function categorizeFull(desc, opts = {}) {
-  const { pluggy, learned, model, cache } = opts;
+  const { pluggy, learned, model, cache, value } = opts;
   if (learned && learned.size) {
     const c = learned.get(merchantKey(desc));
     if (c) return { cat: c, source: "learned" };
@@ -420,14 +423,25 @@ function categorizeFull(desc, opts = {}) {
   }
   if (pluggy) {
     const p = mapPluggyCategory(pluggy.category);
-    if (p) return { cat: p, source: "pluggy" };
+    if (p) {
+      // Pix/TED/DOC recebido: só é "salário" se o valor for alto; senão é sempre "transferências"
+      // (evita que qualquer Pix marcado pelo Pluggy como "income"/"proceeds" vire salário por engano).
+      if (personal) {
+        if (p === "salario" && typeof value === "number" && value >= SALARY_MIN_VALUE) return { cat: "salario", source: "pluggy" };
+        return { cat: "transferencias", source: "rule" };
+      }
+      return { cat: p, source: "pluggy" };
+    }
   }
-  const m = predictModel(model, desc);
-  if (m) return { cat: m, source: "model" };
+  if (!personal) {
+    const m = predictModel(model, desc);
+    if (m) return { cat: m, source: "model" };
+  }
   if (cache && !personal) {
     const c = cache.get(merchantKey(desc));
     if (c && c !== "nao_identificada") return { cat: c, source: "llm" };
   }
+  if (personal) return { cat: "transferencias", source: "rule" };
   return { cat: "nao_identificada", source: null };
 }
 function categorize(desc, opts) { return categorizeFull(desc, opts).cat; }
@@ -448,8 +462,8 @@ async function buildUserCtx(userId) {
   const model = buildModel(rows.map(r => ({ desc: r.d, category: r.category, manual: Number(r.manual) === 1 })));
   return { learned, model };
 }
-function classify(desc, ctx, pluggy) {
-  return categorizeFull(desc, { pluggy, learned: ctx.learned, model: ctx.model, cache: merchantCache });
+function classify(desc, ctx, pluggy, value) {
+  return categorizeFull(desc, { pluggy, learned: ctx.learned, model: ctx.model, cache: merchantCache, value });
 }
 
 // Roda a categorização de novo nas transações ainda "não identificadas" (nunca mexe no que o usuário escolheu à mão).
@@ -470,53 +484,99 @@ async function recategorizeUnidentified(userId = null) {
   return updates.length;
 }
 
-/* ---------- Claude como último recurso (OPCIONAL) ----------
-   Só liga se existir ANTHROPIC_API_KEY no .env. Manda apenas o NOME do estabelecimento
-   (minúsculo, sem números, sem valor, sem dados do usuário) e nunca Pix/TED/transferências.
-   A resposta fica em cache (merchant_cache): cada estabelecimento é perguntado uma única vez. */
+/* ---------- IA como último recurso (OPCIONAL) ----------
+   Usa o Gemini (Google) se GEMINI_API_KEY existir; senão cai para o Claude se ANTHROPIC_API_KEY existir;
+   se nenhuma das duas estiver configurada, essa etapa simplesmente não faz nada.
+   Manda apenas o NOME do estabelecimento (minúsculo, sem números, sem valor, sem dados do usuário) e
+   NUNCA Pix/TED/transferências (essas nunca passam por IA — a regra de salário/transferência é sempre
+   decidida por código, olhando o valor). A resposta fica em cache (merchant_cache): cada estabelecimento
+   é perguntado uma única vez, não importa qual IA respondeu. */
 const LLM_CATEGORIES = ["alimentacao", "transporte", "contas", "entretenimento", "compras", "saude", "educacao", "viagens",
   "transferencias", "fatura", "investimentos", "taxas", "outros", "salario", "nao_identificada"];
+const LLM_SYSTEM_PROMPT =
+  "Você classifica nomes de estabelecimentos de extratos bancários brasileiros (já em minúsculas e sem números) em categorias de gastos pessoais. " +
+  "Categorias válidas: alimentacao (restaurantes, mercados, delivery), transporte (apps de corrida, combustível, estacionamento, pedágio, oficina), " +
+  "contas (luz, água, gás, internet, telefone, aluguel, condomínio, seguros), entretenimento (streaming, jogos, cinema, shows), " +
+  "compras (lojas, e-commerce, roupas, eletrônicos, casa), saude (farmácia, médico, plano, academia), educacao, viagens (hotel, passagem, aluguel de carro), " +
+  "transferencias, fatura (pagamento de cartão), investimentos, taxas (tarifas, impostos, juros), outros, " +
+  "nao_identificada (use quando não der para ter uma certeza razoável). " +
+  "Você nunca recebe nomes de Pix, TED, DOC ou transferências — se algum vier mesmo assim, responda \"transferencias\", nunca \"salario\". " +
+  'Responda SOMENTE com um objeto JSON {"nome recebido":"categoria"} contendo TODOS os nomes recebidos, sem texto extra.';
+
 let merchantCache = new Map();
 let llmRunning = false;
 async function loadMerchantCache() {
   const rows = await all("SELECT key, category FROM merchant_cache");
   merchantCache = new Map(rows.map(r => [r.key, r.category]));
 }
-async function classifyPendingWithClaude(limit = 40) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || llmRunning) return 0;
+
+// Chama o Gemini (Google AI) e devolve { "nome recebido": "categoria" } ou lança erro.
+async function askGemini(keys, apiKey) {
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(45000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: LLM_SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: JSON.stringify(keys) }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 },
+      }),
+    }
+  );
+  if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  const data = await resp.json();
+  const text = (((data.candidates || [])[0] || {}).content || {}).parts?.map(p => p.text || "").join("") || "";
+  if (!text) throw new Error("Gemini não devolveu texto (resposta pode ter sido bloqueada)");
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
+// Chama o Claude (Anthropic) e devolve { "nome recebido": "categoria" } ou lança erro.
+async function askClaude(keys, apiKey) {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    signal: AbortSignal.timeout(45000),
+    body: JSON.stringify({
+      model: process.env.CATEGORY_LLM_MODEL || "claude-haiku-4-5-20251001",
+      max_tokens: 3000,
+      system: LLM_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: JSON.stringify(keys) }],
+    }),
+  });
+  if (!resp.ok) throw new Error(`Claude HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  const data = await resp.json();
+  const text = ((data.content || []).find(b => b.type === "text") || {}).text || "";
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
+async function classifyPendingWithAI(limit = 40) {
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const claudeKey = process.env.ANTHROPIC_API_KEY;
+  if ((!geminiKey && !claudeKey) || llmRunning) return 0;
   llmRunning = true;
   try {
     const rows = await all(`SELECT id, "desc" AS d FROM transactions WHERE category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0`);
     const keys = [];
     for (const r of rows) {
-      if (isPersonalTransfer(r.d)) continue;
+      if (isPersonalTransfer(r.d)) continue; // Pix/TED/transferências nunca vão pra IA
       const k = merchantKey(r.d);
       if (k && !merchantCache.has(k) && !keys.includes(k)) keys.push(k);
       if (keys.length >= limit) break;
     }
     if (keys.length) {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        signal: AbortSignal.timeout(45000),
-        body: JSON.stringify({
-          model: process.env.CATEGORY_LLM_MODEL || "claude-haiku-4-5-20251001",
-          max_tokens: 3000,
-          system: "Você classifica nomes de estabelecimentos de extratos bancários brasileiros (já em minúsculas e sem números) em categorias de gastos pessoais. " +
-            "Categorias válidas: alimentacao (restaurantes, mercados, delivery), transporte (apps de corrida, combustível, estacionamento, pedágio, oficina), " +
-            "contas (luz, água, gás, internet, telefone, aluguel, condomínio, seguros), entretenimento (streaming, jogos, cinema, shows), " +
-            "compras (lojas, e-commerce, roupas, eletrônicos, casa), saude (farmácia, médico, plano, academia), educacao, viagens (hotel, passagem, aluguel de carro), " +
-            "transferencias, fatura (pagamento de cartão), investimentos, taxas (tarifas, impostos, juros), outros, " +
-            "nao_identificada (use quando não der para ter uma certeza razoável). " +
-            'Responda SOMENTE com um objeto JSON {"nome recebido":"categoria"} contendo TODOS os nomes recebidos, sem texto extra.',
-          messages: [{ role: "user", content: JSON.stringify(keys) }],
-        }),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const text = ((data.content || []).find(b => b.type === "text") || {}).text || "";
-      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+      let parsed = null, usedProvider = null, lastErr = null;
+      if (geminiKey) {
+        try { parsed = await askGemini(keys, geminiKey); usedProvider = "gemini"; }
+        catch (e) { lastErr = e; console.error("[categorias] Gemini falhou, tentando o Claude se disponível:", e.message); }
+      }
+      if (!parsed && claudeKey) {
+        try { parsed = await askClaude(keys, claudeKey); usedProvider = "claude"; }
+        catch (e) { lastErr = e; console.error("[categorias] Claude também falhou:", e.message); }
+      }
+      if (!parsed) throw lastErr || new Error("Nenhum provedor de IA disponível respondeu");
       const stmts = [];
       for (const k of keys) {
         const c = LLM_CATEGORIES.includes(parsed[k]) ? parsed[k] : "nao_identificada";
@@ -524,6 +584,7 @@ async function classifyPendingWithClaude(limit = 40) {
         stmts.push({ sql: "INSERT OR REPLACE INTO merchant_cache (key, category, updated_at) VALUES (?,?,datetime('now'))", args: [k, c] });
       }
       await db.batch(stmts, "write");
+      console.log(`[categorias] ${usedProvider} classificou ${keys.length} estabelecimentos novos`);
     }
     // aplica o que está no cache em tudo que ainda está sem categoria
     const updates = [];
@@ -535,10 +596,10 @@ async function classifyPendingWithClaude(limit = 40) {
       }
     }
     for (let i = 0; i < updates.length; i += 200) await db.batch(updates.slice(i, i + 200), "write");
-    if (updates.length) console.log(`[categorias] Claude classificou ${updates.length} transações`);
+    if (updates.length) console.log(`[categorias] ${updates.length} transações classificadas pela IA`);
     return updates.length;
   } catch (e) {
-    console.error("[categorias] falha ao consultar o Claude (segue sem):", e.message);
+    console.error("[categorias] falha ao consultar a IA (segue sem):", e.message);
     return 0;
   } finally {
     llmRunning = false;
@@ -877,7 +938,7 @@ async function syncPluggyItemData(item, headers) {
       const desc = t.description || "Transação";
       const value = pluggyValue(t.amount, acc.type);
       const date = (t.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
-      const { cat, source } = classify(desc, ctx, t);
+      const { cat, source } = classify(desc, ctx, t, value);
       if (pendentes.has(t.id) && cat !== "nao_identificada") {
         updStatements.push({
           sql: "UPDATE transactions SET category = ?, category_source = ?, pluggy_category = ? WHERE user_id = ? AND external_id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0",
@@ -924,7 +985,7 @@ async function syncPluggyItemData(item, headers) {
   const results = await db.batch(statements, "write");
   const novas = results.slice(offset).reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
   await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
-  classifyPendingWithClaude().catch(() => {}); // opcional; só age se ANTHROPIC_API_KEY existir
+  classifyPendingWithAI().catch(() => {}); // opcional; só age se GEMINI_API_KEY ou ANTHROPIC_API_KEY existir
   return { accounts, contas, transacoesProcessadas, novas };
 }
 
@@ -992,6 +1053,22 @@ setInterval(syncAllPluggyItems, 5 * 60 * 1000);
    ============================================================ */
 // Apaga dados fictícios antigos (extratos e bancos de exemplo). Só mexe nos IDs de banco demo;
 // transações vindas do Pluggy (bank_id = item_id) e manuais não são tocadas.
+// Corrige, uma vez, os Pix/TED/DOC recebidos que já tinham sido salvos como "salário" por engano
+// (Pluggy categorizava como "income" e o sistema antigo aceitava qualquer valor). Nunca mexe em
+// categoria escolhida manualmente pelo usuário.
+async function fixMisclassifiedSalaryTransfers() {
+  const rows = await all(
+    `SELECT id, "desc" AS d, value FROM transactions
+     WHERE category = 'salario' AND COALESCE(category_manual, 0) = 0 AND COALESCE(category_source, '') <> 'learned'`
+  );
+  const updates = rows
+    .filter(r => isPersonalTransfer(r.d) && !(typeof r.value === "number" && r.value >= SALARY_MIN_VALUE))
+    .map(r => ({ sql: "UPDATE transactions SET category = 'transferencias', category_source = 'rule' WHERE id = ?", args: [r.id] }));
+  if (!updates.length) return 0;
+  for (let i = 0; i < updates.length; i += 200) await db.batch(updates.slice(i, i + 200), "write");
+  return updates.length;
+}
+
 // Depois do primeiro deploy pode ser removida.
 async function removeDemoData() {
   const ph = DEMO_BANK_IDS.map(() => "?").join(",");
@@ -1004,7 +1081,9 @@ initDb()
   .then(loadMerchantCache)
   .then(() => recategorizeUnidentified())
   .then((n) => { if (n) console.log(`[categorias] ${n} transações reclassificadas automaticamente`); })
-  .then(() => { classifyPendingWithClaude().catch(() => {}); })
+  .then(() => fixMisclassifiedSalaryTransfers())
+  .then((n) => { if (n) console.log(`[categorias] ${n} transferências que estavam marcadas como salário foram corrigidas`); })
+  .then(() => { classifyPendingWithAI().catch(() => {}); })
   .then(() => {
     app.listen(PORT, () => console.log(`FinanApp backend rodando em http://localhost:${PORT}`));
   })
