@@ -251,6 +251,7 @@ let txFilterTipo = "all";
 let txFilterCategoria = "all";
 let esTipo = "entrada";
 let catSegment = "gastos";
+let catDetalhe = null;
 let relSegment = "geral";
 let pendingCatTxId = null;
 let pendingCatSelected = null;
@@ -310,11 +311,11 @@ function navigateTo(screen, { refresh = true } = {}) {
     void target.offsetWidth;
     target.classList.add("active");
   }
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === screen));
-  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
+  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   document.getElementById("topbar-title").textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
-  if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas");
+  if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas" && screen !== "categoria-detalhe");
   renderScreen(screen);
   document.getElementById("content").scrollTop = 0;
   loadScreenData(screen, refresh);
@@ -343,6 +344,7 @@ function renderScreen(screen) {
   if (screen === "transacoes") renderTransacoes();
   if (screen === "entradas-saidas") renderEntradasSaidas();
   if (screen === "categorias") renderCategorias();
+  if (screen === "categoria-detalhe") renderCategoriaDetalhe();
   if (screen === "relatorios") renderRelatorios();
 }
 
@@ -608,11 +610,36 @@ function renderLegend(elId, byCat, total) {
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="legend-row">
+    return `<div class="legend-row" data-cat="${cat}">
       <div class="legend-left"><span class="legend-dot" style="background:${info.color}"></span>${info.icon} ${info.name}</div>
       <div><span class="legend-pct">${pct}%</span> &nbsp; ${fmtBRL(val)}</div>
     </div>`;
   }).join("");
+}
+
+/* ============================================================
+   DETALHE DA CATEGORIA (só gastos ou só ganhos daquela categoria)
+   ============================================================ */
+function openCategoriaDetalhe(cat) {
+  catDetalhe = cat;
+  navigateTo("categoria-detalhe", { refresh: false });
+}
+function renderCategoriaDetalhe() {
+  const info = catInfo(catDetalhe);
+  const isGasto = catSegment === "gastos";
+  document.getElementById("topbar-title").textContent = info.name;
+  const txs = state.transactions
+    .filter(t => (isGasto ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === catDetalhe)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const total = txs.reduce((s, t) => s + Math.abs(t.value), 0);
+  const el = document.getElementById("catdet-container");
+  const head = `<div class="card catdet-head">
+    <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+    <div><div class="cat-name">${esc(info.name)}</div>
+    <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"}</div></div>
+    <div class="cat-amount catdet-total ${isGasto ? "neg" : "pos"}">${fmtBRL(total)}</div>
+  </div>`;
+  el.innerHTML = head + (txs.length ? `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria.</div>`);
 }
 
 /* ============================================================
@@ -976,7 +1003,7 @@ function renderCategorias() {
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="cat-row">
+    return `<div class="cat-row" data-cat="${cat}">
       <div class="cat-row-left">
         <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
         <div>
@@ -1534,7 +1561,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }, "filtros do dashboard");
 
   wire(() => {
-    document.getElementById("btn-back").addEventListener("click", () => navigateTo("inicio"));
+    document.getElementById("btn-back").addEventListener("click", () => navigateTo(currentScreen === "categoria-detalhe" ? "categorias" : "inicio", { refresh: false }));
+    document.getElementById("catdet-container").addEventListener("click", (e) => {
+      const row = e.target.closest("[data-tx-id]");
+      if (row) openTxDetalhe(row.dataset.txId);
+    });
+    const openCat = (e) => { const r = e.target.closest("[data-cat]"); if (r) openCategoriaDetalhe(r.dataset.cat); };
+    document.getElementById("categorias-list").addEventListener("click", openCat);
+    document.getElementById("cat-legend").addEventListener("click", openCat);
     document.getElementById("es-list-container").addEventListener("click", (e) => {
       const row = e.target.closest("[data-tx-id]");
       if (row) openTxDetalhe(row.dataset.txId);

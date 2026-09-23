@@ -162,12 +162,12 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_external ON transactions(user_id, external_id)");
   // investimentos (Pluggy) + histórico diário de saldo para comparar com ~1 mês atrás
-  await db.execute(`CREATE TABLE IF NOT EXISTS pluggy_investments (
+  await db.execute(`CREATE TABLE IF NOT EXISTS inv_positions (
     inv_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, item_id TEXT NOT NULL,
     name TEXT, type TEXT, subtype TEXT, balance REAL, amount_original REAL, profit REAL,
     applied_date TEXT, due_date TEXT, updated_at TEXT
   )`);
-  await db.execute(`CREATE TABLE IF NOT EXISTS investment_history (
+  await db.execute(`CREATE TABLE IF NOT EXISTS inv_daily_history (
     user_id INTEGER NOT NULL, item_id TEXT NOT NULL, inv_id TEXT NOT NULL, day TEXT NOT NULL, balance REAL,
     PRIMARY KEY (user_id, inv_id, day)
   )`);
@@ -971,8 +971,8 @@ app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
 
 // Investimentos + histórico diário (últimos 120 dias). Só devolve o que existe: banco sem investimento não aparece.
 app.get("/api/investments", auth, h(async (req, res) => {
-  const investments = await all("SELECT inv_id, item_id, name, type, subtype, balance, amount_original, profit, applied_date, due_date, updated_at FROM pluggy_investments WHERE user_id = ?", [req.userId]);
-  const history = await all("SELECT item_id, inv_id, day, balance FROM investment_history WHERE user_id = ? AND day >= date('now','-120 days') ORDER BY day", [req.userId]);
+  const investments = await all("SELECT inv_id, item_id, name, type, subtype, balance, amount_original, profit, applied_date, due_date, updated_at FROM inv_positions WHERE user_id = ?", [req.userId]);
+  const history = await all("SELECT item_id, inv_id, day, balance FROM inv_daily_history WHERE user_id = ? AND day >= date('now','-120 days') ORDER BY day", [req.userId]);
   res.json({ investments, history });
 }));
 
@@ -991,8 +991,8 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   }
   await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, item.item_id]);
   await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [item.item_id]);
-  await run("DELETE FROM pluggy_investments WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
-  await run("DELETE FROM investment_history WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
+  await run("DELETE FROM inv_positions WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
+  await run("DELETE FROM inv_daily_history WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
   await run("DELETE FROM pluggy_items WHERE id = ?", [item.id]);
   res.json({ ok: true });
 }));
@@ -1056,18 +1056,18 @@ async function syncPluggyItemData(item, headers) {
     const invResp = await fetch(`${PLUGGY_BASE_URL}/investments?itemId=${item.item_id}`, { headers });
     if (invResp.ok) {
       const { results: invs = [] } = await invResp.json();
-      invStatements.push({ sql: "DELETE FROM pluggy_investments WHERE user_id = ? AND item_id = ?", args: [item.user_id, item.item_id] });
+      invStatements.push({ sql: "DELETE FROM inv_positions WHERE user_id = ? AND item_id = ?", args: [item.user_id, item.item_id] });
       for (const v of invs) {
         const bal = [v.balance, v.amount, v.value].find(x => typeof x === "number") ?? 0;
         invStatements.push({
-          sql: `INSERT OR REPLACE INTO pluggy_investments (inv_id, user_id, item_id, name, type, subtype, balance, amount_original, profit, applied_date, due_date, updated_at)
+          sql: `INSERT OR REPLACE INTO inv_positions (inv_id, user_id, item_id, name, type, subtype, balance, amount_original, profit, applied_date, due_date, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?, datetime('now'))`,
           args: [v.id, item.user_id, item.item_id, v.name || v.issuer || "Investimento", v.type || null, v.subtype || null, bal,
                  typeof v.amountOriginal === "number" ? v.amountOriginal : null, typeof v.amountProfit === "number" ? v.amountProfit : null,
                  (v.date || "").slice(0, 10) || null, (v.dueDate || "").slice(0, 10) || null]
         });
         invStatements.push({
-          sql: "INSERT OR REPLACE INTO investment_history (user_id, item_id, inv_id, day, balance) VALUES (?,?,?, date('now','-3 hours'), ?)",
+          sql: "INSERT OR REPLACE INTO inv_daily_history (user_id, item_id, inv_id, day, balance) VALUES (?,?,?, date('now','-3 hours'), ?)",
           args: [item.user_id, item.item_id, v.id, bal]
         });
       }

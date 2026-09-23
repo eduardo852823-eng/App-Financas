@@ -687,3 +687,10 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .inv-muted{font-size:12px; color:var(--text-secondary);}
 .inv-ago{margin-top:3px; font-size:12.5px;}
 .inv-delta{font-weight:700;} .inv-delta.pos{color:var(--green,#10B981);} .inv-delta.neg{color:var(--red,#EF4444);}
+
+.cat-row[data-cat], .legend-row[data-cat]{cursor:pointer;}
+.legend-row[data-cat]{padding:4px 2px; border-radius:8px;}
+.cat-row[data-cat]:active, .legend-row[data-cat]:active{opacity:.7;}
+.catdet-head{display:flex; align-items:center; gap:12px; padding:14px 16px; margin-bottom:14px;}
+.catdet-head .cat-amount{margin-left:auto;}
+.catdet-total.neg{color:var(--red,#EF4444);} .catdet-total.pos{color:var(--green,#10B981);}
