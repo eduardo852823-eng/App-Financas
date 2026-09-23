@@ -208,60 +208,60 @@
       <!-- ---------- RELATÓRIOS ---------- -->
       <section class="screen screen-relatorios" data-screen="relatorios">
         <div class="segmented" id="rel-segmented">
-          <button class="seg-btn active" data-seg="geral">Geral</button>
-          <button class="seg-btn" data-seg="comparar">Comparar</button>
+          <button class="seg-btn active" data-seg="geral">Resumo</button>
+          <button class="seg-btn" data-seg="comparar">Comparar meses</button>
         </div>
 
         <div id="rel-geral">
-          <div class="filters-grid">
-            <div>
-              <label class="mini-lbl">Ano</label>
-              <select id="rel-ano"></select>
-            </div>
+          <div class="filters-grid rel-filters-2">
             <div>
               <label class="mini-lbl">Mês</label>
               <select id="rel-mes"></select>
             </div>
             <div>
-              <label class="mini-lbl">Banco</label>
-              <select id="rel-banco"><option value="all">Todos</option></select>
-            </div>
-            <div>
-              <label class="mini-lbl">Categoria</label>
-              <select id="rel-categoria"><option value="all">Todas</option></select>
+              <label class="mini-lbl">Ano</label>
+              <select id="rel-ano"></select>
             </div>
           </div>
+          <details class="more-filters">
+            <summary>Mais filtros (banco e categoria)</summary>
+            <div class="filters-grid">
+              <div><label class="mini-lbl">Banco</label><select id="rel-banco"><option value="all">Todos</option></select></div>
+              <div><label class="mini-lbl">Categoria</label><select id="rel-categoria"><option value="all">Todas</option></select></div>
+            </div>
+          </details>
 
           <div class="row-cards">
             <div class="card card-mini card-green">
-              <span class="mini-label">↑ Entradas</span>
+              <span class="mini-label">↑ Entrou</span>
               <span class="mini-value" id="rel-entradas">R$ 0,00</span>
             </div>
             <div class="card card-mini card-red">
-              <span class="mini-label">↓ Saídas</span>
+              <span class="mini-label">↓ Saiu</span>
               <span class="mini-value" id="rel-saidas">R$ 0,00</span>
             </div>
           </div>
           <div class="card card-result">
-            <span class="mini-label">Resultado</span>
+            <span class="mini-label" id="rel-res-label">Sobrou</span>
             <span class="mini-value" id="rel-resultado">R$ 0,00</span>
           </div>
+          <p class="rel-frase" id="rel-frase"></p>
 
-          <div class="section-head"><h3>Por banco</h3></div>
+          <div class="section-head"><h3>Gastos por banco</h3></div>
           <div class="card" id="rel-por-banco"></div>
         </div>
 
         <div id="rel-comparar" class="hidden">
-          <label class="mini-lbl">Selecione os meses</label>
+          <label class="mini-lbl">Compare estes dois meses</label>
           <select id="comp-mes1"></select>
           <div class="vs-label">VS</div>
           <select id="comp-mes2"></select>
-          <label class="mini-lbl" style="margin-top:14px">Tipo</label>
+          <label class="mini-lbl" style="margin-top:14px">O que comparar?</label>
           <select id="comp-tipo">
-            <option value="saida">Gastos</option>
-            <option value="entrada">Entradas</option>
+            <option value="saida">O que gastei</option>
+            <option value="entrada">O que recebi</option>
           </select>
-          <button class="btn btn-primary" id="btn-comparar" style="margin-top:14px">Gerar comparação</button>
+          <button class="btn btn-primary hidden" id="btn-comparar" style="margin-top:14px">Gerar comparação</button>
           <div class="card hidden" id="comp-resultado"></div>
         </div>
       </section>
@@ -269,28 +269,7 @@
     </main>
 
     <!-- ---------- BOTTOM NAV ---------- -->
-    <nav class="bottom-nav" id="bottom-nav">
-      <button class="nav-btn active" data-nav="inicio">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
-        <span>Início</span>
-      </button>
-      <button class="nav-btn" data-nav="transacoes">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/></svg>
-        <span>Transações</span>
-      </button>
-      <button class="nav-btn" data-nav="categorias">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
-        <span>Categorias</span>
-      </button>
-      <button class="nav-btn" data-nav="relatorios">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
-        <span>Relatórios</span>
-      </button>
-      <button class="nav-btn" data-nav="investimentos">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>
-        <span>Investimentos</span>
-      </button>
-    </nav>
+    <nav class="bottom-nav" id="bottom-nav"></nav>
   </div>
 
   <!-- ===================== TRANSAÇÃO DETALHE (modal) ===================== -->
@@ -411,6 +390,11 @@
           <option value="USD">Dólar (US$)</option>
           <option value="EUR">Euro (€)</option>
         </select>
+        <label>Cor do app</label>
+        <div class="accent-picker" id="accent-picker"></div>
+        <label>Abas de baixo <span class="cfg-hint">arraste ☰ para mudar a ordem • toque no olho para esconder</span></label>
+        <ul class="nav-editor" id="nav-editor"></ul>
+        <button type="button" class="btn-link-small" id="btn-nav-reset">Restaurar padrão</button>
         <label class="checkbox-row" style="margin-top:14px">
           <input type="checkbox" id="cfg-modo-escuro"> Modo escuro
         </label>

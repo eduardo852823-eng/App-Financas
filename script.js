@@ -285,6 +285,115 @@ let txVisibleCount = TX_PAGE_SIZE;
    localmente só para aplicar sem "flash" ao abrir o app.
    ============================================================ */
 const THEME_CACHE_KEY = "fh_theme_cache";
+/* ---------- cores do app (paletas prontas) ---------- */
+const ACCENTS = {
+  verde:   { name: "Verde",   light: ["#059669","#064E3B","#047857","#064E3B","5,150,105"],  dark: ["#10B981","#052E22","#047857","#064E3B","16,185,129"] },
+  azul:    { name: "Azul",    light: ["#2563EB","#1E3A8A","#1D4ED8","#172554","37,99,235"],   dark: ["#3B82F6","#0B1930","#1D4ED8","#172554","59,130,246"] },
+  roxo:    { name: "Roxo",    light: ["#7C3AED","#4C1D95","#6D28D9","#3B0764","124,58,237"],  dark: ["#8B5CF6","#2E1065","#6D28D9","#3B0764","139,92,246"] },
+  vermelho:{ name: "Vermelho",light: ["#DC2626","#7F1D1D","#B91C1C","#450A0A","220,38,38"],   dark: ["#EF4444","#450A0A","#B91C1C","#450A0A","239,68,68"] },
+  laranja: { name: "Laranja", light: ["#EA580C","#7C2D12","#C2410C","#431407","234,88,12"],   dark: ["#FB923C","#431407","#C2410C","#431407","251,146,60"] },
+  rosa:    { name: "Rosa",    light: ["#DB2777","#831843","#BE185D","#500724","219,39,119"],  dark: ["#F472B6","#500724","#BE185D","#500724","244,114,182"] }
+};
+function currentAccent() { const a = localStorage.getItem("accent"); return ACCENTS[a] ? a : "verde"; }
+function applyAccent() {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  const [base, deep1, mid, deep, rgb] = ACCENTS[currentAccent()][dark ? "dark" : "light"];
+  const st = document.documentElement.style;
+  st.setProperty("--blue", base); st.setProperty("--blue-dark", deep1);
+  st.setProperty("--accent-mid", mid); st.setProperty("--accent-deep", deep); st.setProperty("--accent-rgb", rgb);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ACCENTS[currentAccent()].light[0]);
+}
+function renderAccentPicker() {
+  const el = document.getElementById("accent-picker"); if (!el) return;
+  const cur = currentAccent();
+  el.innerHTML = Object.entries(ACCENTS).map(([id, a]) =>
+    `<button type="button" class="accent-dot${id === cur ? " active" : ""}" data-accent="${id}" style="background:${a.light[0]}" title="${a.name}" aria-label="${a.name}"></button>`).join("");
+}
+
+/* ---------- abas de baixo: ordem e visibilidade ---------- */
+const NAV_DEFS = {
+  inicio:       { label: "Início",        svg: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>' },
+  transacoes:   { label: "Transações",    svg: '<path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/>' },
+  categorias:   { label: "Categorias",    svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>' },
+  relatorios:   { label: "Relatórios",    svg: '<path d="M4 19V9M12 19V5M20 19v-7"/>' },
+  investimentos:{ label: "Investimentos", svg: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>' },
+  bancos:       { label: "Meus bancos",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
+};
+const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","relatorios","investimentos","bancos"], hidden: ["bancos"] };
+function getNavCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem("navCfg") || "null");
+    if (c && Array.isArray(c.order)) {
+      const order = c.order.filter(id => NAV_DEFS[id]);
+      Object.keys(NAV_DEFS).forEach(id => { if (!order.includes(id)) order.push(id); });
+      return { order, hidden: (c.hidden || []).filter(id => NAV_DEFS[id]) };
+    }
+  } catch (e) { /* usa o padrão */ }
+  return JSON.parse(JSON.stringify(NAV_DEFAULT));
+}
+function saveNavCfg(c) { localStorage.setItem("navCfg", JSON.stringify(c)); renderBottomNav(); }
+function renderBottomNav() {
+  const nav = document.getElementById("bottom-nav"); if (!nav) return;
+  const c = getNavCfg();
+  const active = currentScreen === "categoria-detalhe" ? "categorias" : currentScreen;
+  nav.innerHTML = c.order.filter(id => !c.hidden.includes(id)).map(id =>
+    `<button class="nav-btn${id === active ? " active" : ""}" data-nav="${id}">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${NAV_DEFS[id].svg}</svg>
+      <span>${NAV_DEFS[id].label}</span></button>`).join("");
+}
+function renderNavEditor() {
+  const el = document.getElementById("nav-editor"); if (!el) return;
+  const c = getNavCfg();
+  el.innerHTML = c.order.map(id => {
+    const off = c.hidden.includes(id);
+    return `<li class="nav-edit-item${off ? " off" : ""}" data-id="${id}">
+      <span class="nav-handle" title="Arraste para mudar a ordem">☰</span>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${NAV_DEFS[id].svg}</svg>
+      <span class="nav-edit-name">${NAV_DEFS[id].label}</span>
+      <button type="button" class="nav-eye" data-toggle="${id}" aria-label="${off ? "Mostrar" : "Esconder"} ${NAV_DEFS[id].label}">${off ? "🙈" : "👁"}</button>
+    </li>`;
+  }).join("");
+}
+function wireNavEditor() {
+  const el = document.getElementById("nav-editor"); if (!el) return;
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-toggle]"); if (!b) return;
+    const c = getNavCfg(), id = b.dataset.toggle;
+    if (c.hidden.includes(id)) {
+      if (c.order.length - c.hidden.length >= 5) { showToast("No máximo 5 abas na barra. Esconda uma antes."); return; }
+      c.hidden = c.hidden.filter(x => x !== id);
+    } else {
+      if (c.order.length - c.hidden.length <= 2) { showToast("Deixe pelo menos 2 abas visíveis."); return; }
+      c.hidden.push(id);
+    }
+    saveNavCfg(c); renderNavEditor();
+  });
+  let drag = null;
+  el.addEventListener("pointerdown", (e) => {
+    const h = e.target.closest(".nav-handle"); if (!h) return;
+    drag = h.closest(".nav-edit-item"); drag.classList.add("dragging");
+    h.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const others = [...el.children].filter(li => li !== drag);
+    const after = others.find(li => { const r = li.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+    if (after) { if (drag.nextSibling !== after) el.insertBefore(drag, after); } else el.appendChild(drag);
+  });
+  const end = () => {
+    if (!drag) return;
+    drag.classList.remove("dragging"); drag = null;
+    const c = getNavCfg(); c.order = [...el.children].map(li => li.dataset.id);
+    saveNavCfg(c); renderNavEditor();
+  };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  document.getElementById("btn-nav-reset").addEventListener("click", () => { saveNavCfg(JSON.parse(JSON.stringify(NAV_DEFAULT))); renderNavEditor(); });
+  document.getElementById("accent-picker").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-accent]"); if (!b) return;
+    localStorage.setItem("accent", b.dataset.accent); applyAccent(); renderAccentPicker();
+    if (currentScreen === "categorias") renderCategorias();
+  });
+}
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   const sun = document.getElementById("theme-icon-sun");
@@ -293,6 +402,7 @@ function applyTheme(theme) {
     sun.classList.toggle("hidden", theme === "dark");
     moon.classList.toggle("hidden", theme !== "dark");
   }
+  applyAccent();
 }
 function initTheme() {
   applyTheme(localStorage.getItem(THEME_CACHE_KEY) || "light");
@@ -1133,7 +1243,9 @@ function populateRelatorioFilters() {
   anoSel.value = currentAno;
 
   const mesSel = document.getElementById("rel-mes");
-  mesSel.innerHTML = `<option value="all">Todos os meses</option>` + MONTH_NAMES.map((m,i) => `<option value="${i}">${m}</option>`).join("");
+  const prevMes = mesSel.value;
+  mesSel.innerHTML = `<option value="all">Ano inteiro</option>` + MONTH_NAMES.map((m,i) => `<option value="${i}">${m}</option>`).join("");
+  mesSel.value = prevMes || String(new Date().getMonth());
 
   const bancoSel = document.getElementById("rel-banco");
   const connected = connectedBanks();
@@ -1174,7 +1286,13 @@ function computeRelGeral() {
   const saidas = txs.filter(t => t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
   document.getElementById("rel-entradas").textContent = fmtBRL(entradas);
   document.getElementById("rel-saidas").textContent = fmtBRL(saidas);
-  document.getElementById("rel-resultado").textContent = (entradas-saidas >= 0 ? "+ " : "- ") + fmtBRL(Math.abs(entradas-saidas));
+  const sobra = entradas - saidas;
+  document.getElementById("rel-resultado").textContent = fmtBRL(Math.abs(sobra));
+  document.getElementById("rel-res-label").textContent = sobra >= 0 ? "Sobrou" : "Faltou";
+  document.getElementById("rel-resultado").style.color = sobra >= 0 ? "var(--green)" : "var(--red)";
+  document.getElementById("rel-frase").textContent = txs.length
+    ? `Entrou ${fmtBRL(entradas)} e saiu ${fmtBRL(saidas)}. ${sobra >= 0 ? "Sobrou" : "Faltou"} ${fmtBRL(Math.abs(sobra))} no período.`
+    : "Nenhuma transação neste período.";
 
   const ano = document.getElementById("rel-ano").value;
   const allTx = state.transactions.filter(t => t.date.startsWith(ano));
@@ -1232,11 +1350,11 @@ function renderComparacao() {
   const pct = v1 ? ((diff/v1)*100).toFixed(0) : "0";
   const el = document.getElementById("comp-resultado");
   el.classList.remove("hidden");
-  el.innerHTML = `
-    <div class="comp-line"><span>${monthLabel(m1)}</span><span>${fmtBRL(v1)}</span></div>
-    <div class="comp-line"><span>${monthLabel(m2)}</span><span>${fmtBRL(v2)}</span></div>
-    <div class="comp-diff ${diff>=0 ? "up":"down"}">${diff>=0?"↑":"↓"} ${Math.abs(pct)}% <span style="font-weight:500;font-size:13px;color:var(--text-secondary)">(${fmtBRL(Math.abs(diff))} ${diff>=0?"a mais":"a menos"})</span></div>
-  `;
+  const verbo = tipo === "saida" ? "gastou" : "recebeu";
+  el.innerHTML = v1 === 0 && v2 === 0
+    ? `<div class="empty-state">Sem dados nesses dois meses.</div>`
+    : `<div class="comp-diff ${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "↑" : "↓"} ${fmtBRL(Math.abs(diff))} ${diff >= 0 ? "a mais" : "a menos"}</div>
+       <p class="rel-frase">Em ${monthLabel(m2)} você ${verbo} ${fmtBRL(v2)}. Em ${monthLabel(m1)} foram ${fmtBRL(v1)}${v1 ? ` (${Math.abs(pct)}% ${diff >= 0 ? "a mais" : "a menos"})` : ""}.</p>`;
 }
 
 /* ============================================================
@@ -1339,6 +1457,7 @@ function openConfiguracoes() {
   document.getElementById("cfg-email").value = state.user?.email || "";
   document.getElementById("cfg-moeda").value = state.preferences.currency || "BRL";
   document.getElementById("cfg-modo-escuro").checked = document.documentElement.getAttribute("data-theme") === "dark";
+  renderAccentPicker(); renderNavEditor();
   openModal("modal-configuracoes");
 }
 async function saveConfiguracoes() {
@@ -1590,6 +1709,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }, "tema");
 
   wire(() => {
+    renderBottomNav(); wireNavEditor();
     document.getElementById("bottom-nav").addEventListener("click", (e) => {
       const btn = e.target.closest(".nav-btn");
       if (btn) navigateTo(btn.dataset.nav);
@@ -1754,6 +1874,8 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById(id).addEventListener("change", computeRelGeral);
     });
     document.getElementById("btn-comparar").addEventListener("click", renderComparacao);
+    ["comp-mes1","comp-mes2","comp-tipo"].forEach(id => document.getElementById(id).addEventListener("change", renderComparacao));
+    document.getElementById("rel-segmented").addEventListener("click", () => { if (relSegment === "comparar") renderComparacao(); });
   }, "relatórios");
 
   wire(async () => {
