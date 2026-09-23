@@ -101,8 +101,17 @@ async function withLoading(btn, fn, { minMs = MIN_BTN_SPIN_MS } = {}) {
     delete btn.dataset.loading;
   }
 }
-function showScreenLoader() { document.getElementById("screen-loader")?.classList.add("show"); }
-function hideScreenLoader() { document.getElementById("screen-loader")?.classList.remove("show"); }
+// As bolinhas nunca ficam girando para sempre: se algo travar, elas somem sozinhas depois de 50 s.
+let loaderWatchdog = null;
+function showScreenLoader() {
+  document.getElementById("screen-loader")?.classList.add("show");
+  clearTimeout(loaderWatchdog);
+  loaderWatchdog = setTimeout(hideScreenLoader, 50000);
+}
+function hideScreenLoader() {
+  clearTimeout(loaderWatchdog);
+  document.getElementById("screen-loader")?.classList.remove("show");
+}
 const MONTH_NAMES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 /* ============================================================
@@ -112,13 +121,26 @@ function getToken() { return localStorage.getItem(TOKEN_KEY); }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
-async function api(path, { method = "GET", body } = {}) {
+// Toda chamada ao servidor tem tempo limite. Antes, se o servidor demorasse ou caísse, a chamada nunca
+// terminava e as bolinhas giravam para sempre. O servidor gratuito "dorme" e pode levar ~1 min para acordar.
+const API_TIMEOUT_MS = 45000;
+async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS } = {}) {
   const headers = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}${path}`, {
-    method, headers, body: body ? JSON.stringify(body) : undefined
-  });
+  const ctrl = new AbortController();
+  const killer = setTimeout(() => ctrl.abort(), timeout);
+  const slowHint = timeout > API_TIMEOUT_MS ? null : setTimeout(() => showToast("O servidor está acordando. Pode levar até 1 minuto na primeira vez.", { ms: 8000 }), 8000);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal
+    });
+  } catch (e) {
+    throw new Error(e.name === "AbortError"
+      ? "O servidor não respondeu a tempo. Tente de novo em instantes."
+      : "Sem conexão com o servidor. Confira a internet e tente de novo.");
+  } finally { clearTimeout(killer); clearTimeout(slowHint); }
   let data = null;
   try { data = await res.json(); } catch (e) { /* sem corpo */ }
   if (res.status === 401 && token && !path.startsWith("/auth/")) {
@@ -161,17 +183,19 @@ async function refreshTransactions() {
   const rows = await api("/transactions");
   state.transactions = rows.map(t => ({ ...t, bank_id: t.account_id || t.bank_id }));
 }
+// Se a busca falhar (internet caiu, servidor lento), mantém o que já estava na tela em vez de zerar.
+// Antes, um erro passageiro esvaziava as contas e parecia que "o banco sumiu" depois de sincronizar.
 async function refreshAccounts() {
   try { state.accounts = await api("/pluggy/accounts"); }
-  catch (e) { state.accounts = []; }
+  catch (e) { console.warn("contas: mantendo dados anteriores —", e.message); }
 }
 async function refreshInvestments() {
   try { const r = await api("/investments"); state.investments = r.investments || []; state.investHistory = r.history || []; }
-  catch (e) { state.investments = []; state.investHistory = []; }
+  catch (e) { console.warn("investimentos: mantendo dados anteriores —", e.message); }
 }
 async function refreshPluggyItems() {
   try { state.pluggyItems = await api("/pluggy/items"); }
-  catch (e) { state.pluggyItems = []; }
+  catch (e) { console.warn("conexões: mantendo dados anteriores —", e.message); }
 }
 async function refreshCategories() {
   try {
@@ -220,7 +244,7 @@ function prettyName(str) {
 }
 function accountLabel(a) {
   const n = prettyName(a.name) || "Conta";
-  return a.type === "CREDIT" ? `Cartão ${n}` : n;
+  return a.type === "CREDIT" && !/^cart[aã]o/i.test(n) ? `Cartão ${n}` : n;
 }
 // Contas (bancos e cartões) no formato usado pelos filtros: { id, name, color, type, balance }
 function connectedBanks() {
@@ -300,8 +324,7 @@ function applyAccent() {
   const [base, deep1, mid, deep, rgb] = ACCENTS[currentAccent()][dark ? "dark" : "light"];
   const st = document.documentElement.style;
   st.setProperty("--blue", base); st.setProperty("--blue-dark", deep1);
-  // cor de "saída/gasto": nunca amarela; no tema vermelho usa um carmim/rosa mais fechado para não brigar com o destaque
-  const out = { vermelho: dark ? "#FB7185" : "#BE123C", rosa: dark ? "#F87171" : "#E5484D" }[currentAccent()] || (dark ? "#FB7185" : "#E5484D");
+  const out = { vermelho: dark ? "#FBBF24" : "#D97706", rosa: dark ? "#F87171" : "#E5484D" }[currentAccent()] || (dark ? "#FB7185" : "#E5484D");
   st.setProperty("--out", out);
   st.setProperty("--accent-mid", mid); st.setProperty("--accent-deep", deep); st.setProperty("--accent-rgb", rgb);
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ACCENTS[currentAccent()].light[0]);
@@ -505,6 +528,7 @@ async function loadScreenData(screen, refresh) {
     if (mine === navToken && refresh && state.user && currentScreen === screen) renderScreen(screen);
   } catch (e) {
     console.warn("não foi possível atualizar os dados:", e.message);
+    if (mine === navToken) showToast("Não deu para atualizar agora. Estou mostrando os últimos dados salvos. " + e.message, { error: true });
   } finally {
     if (mine === navToken) hideScreenLoader();
   }
@@ -573,7 +597,7 @@ function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) 
 function populateDashboardFilters() {
   const months = getAvailableMonths();
   const periodoSel = document.getElementById("filter-periodo");
-  periodoSel.innerHTML = `<option value="all">Todos os períodos</option>` +
+  periodoSel.innerHTML = `<option value="all">Todo o período</option>` +
     months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("");
   periodoSel.value = dashFilterPeriodo;
 
@@ -603,10 +627,19 @@ function renderDashboard() {
   const saldoContas = banks.filter(b => (dashFilterBanco === "all" || b.id === dashFilterBanco) && typeof b.balance === "number");
   const saldo = saldoContas.length ? saldoContas.reduce((s,b) => s + b.balance, 0) : entradas - saidas;
 
-  document.getElementById("balance-total").textContent = fmtBRL(saldo);
+  document.getElementById("balance-total").innerHTML = heroMoneyHtml(saldo);
   document.getElementById("total-entradas").textContent = fmtBRL(entradas);
   document.getElementById("total-saidas").textContent = fmtBRL(saidas);
-  document.getElementById("balance-change").textContent = txs.length ? `${txs.length} transações no período` : "Nenhuma transação no período";
+  document.getElementById("balance-change").textContent = txs.length ? `${txs.length} transaç${txs.length === 1 ? "ão" : "ões"} no período` : "Nenhuma transação no período";
+  const movimento = entradas + saidas;
+  const pctIn = movimento ? Math.round((entradas / movimento) * 100) : 50;
+  const flowIn = document.getElementById("flow-in"), flowOut = document.getElementById("flow-out");
+  if (flowIn && flowOut) {
+    flowIn.style.width = (movimento ? pctIn : 50) + "%";
+    flowOut.style.width = (movimento ? 100 - pctIn : 50) + "%";
+    flowIn.parentElement.classList.toggle("empty", !movimento);
+  }
+  drawHeroFlow(txs);
 
   const banksScroll = document.getElementById("banks-scroll");
   banksScroll.innerHTML = banks.map(i => {
@@ -623,6 +656,36 @@ function renderDashboard() {
     </button>`;
 
   renderCards();
+}
+
+// "R$ 1.234,56" vira R$ pequeno + número grande + centavos pequenos (só tipografia, o valor é o mesmo)
+function heroMoneyHtml(v) {
+  const txt = fmtBRL(v);
+  const m = txt.match(/^(-?)R\$ ([\d.]+)(,\d{2})$/);
+  if (!m) return `<span class="cur">R$</span>${esc(txt.replace(/^-?R\$ ?/, ""))}`;
+  return `<span class="cur">R$</span>${m[1] ? "-" : ""}${m[2]}<span class="cents">${m[3]}</span>`;
+}
+// Linha de "fluxo" do saldo dentro do período (soma acumulada das transações por dia). Só desenha; não altera dados.
+function drawHeroFlow(txs) {
+  const svg = document.getElementById("hero-flow");
+  if (!svg) return;
+  const W = 320, H = 70, PAD = 8;
+  const byDay = {};
+  txs.forEach(t => { byDay[t.date] = (byDay[t.date] || 0) + t.value; });
+  const days = Object.keys(byDay).sort();
+  let acc = 0;
+  let pts = days.map(d => (acc += byDay[d]));
+  if (valuesHidden() || pts.length < 2) pts = [0, 0.15, -0.1, 0.2, 0, 0.25, 0.1]; // linha calma de enfeite (sem dados ou valores escondidos)
+  const min = Math.min(...pts), max = Math.max(...pts), span = (max - min) || 1;
+  const xy = pts.map((v, i) => [ (i / (pts.length - 1)) * W, H - PAD - ((v - min) / span) * (H - PAD * 2) ]);
+  let d = `M${xy[0][0].toFixed(1)},${xy[0][1].toFixed(1)}`;
+  for (let i = 1; i < xy.length; i++) {
+    const [x0, y0] = xy[i - 1], [x1, y1] = xy[i], cx = ((x0 + x1) / 2).toFixed(1);
+    d += ` C${cx},${y0.toFixed(1)} ${cx},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  }
+  svg.innerHTML = `<defs><linearGradient id="hf-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".28"/><stop offset="1" stop-color="var(--blue)" stop-opacity="0"/></linearGradient></defs>
+    <path d="${d} L${W},${H} L0,${H} Z" fill="url(#hf-fill)"/>
+    <path d="${d}" fill="none" stroke="var(--blue)" stroke-width="2.2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
 }
 
 function applyHideUI() {
@@ -681,6 +744,7 @@ function kvRow(label, valueHtml) {
 }
 const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
 
+const TRASH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>';
 function cardHtml(a) {
   const d = a.data || {};
   const c = d.creditData || {};
@@ -697,6 +761,7 @@ function cardHtml(a) {
     <div class="credit-card-top" style="background:${color}">
       <div class="credit-card-name">${esc(title)}</div>
       <div class="credit-card-sub">${sub || "Cartão de crédito"}</div>
+      <button type="button" class="cc-del" data-card-del="${esc(a.account_id)}" title="Excluir cartão" aria-label="Excluir cartão ${esc(title)}">${TRASH_SVG}</button>
     </div>
     <div class="credit-card-body">
       ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>` : ""}
@@ -716,9 +781,42 @@ function cardHtml(a) {
       ${kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))}
       ${kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment))}
       ${kvRow("Compras registradas nas transações", money(spent))}
-      <button class="btn-connect card-tx-btn" data-card-tx="${esc(a.account_id)}">Ver transações do cartão</button>
+      <div class="cc-actions">
+        <button class="btn-connect card-tx-btn" data-card-tx="${esc(a.account_id)}">Ver transações</button>
+        <button class="btn-connect danger" type="button" data-card-del="${esc(a.account_id)}">Excluir cartão</button>
+      </div>
     </div>
   </div>`;
+}
+
+// Excluir cartão de vez (não volta na sincronização). Pergunta antes, com um aviso bem legível.
+let cardToDelete = null;
+function askDeleteCard(accountId) {
+  const a = state.accounts.find(x => x.account_id === accountId);
+  if (!a) return;
+  cardToDelete = accountId;
+  const d = a.data || {};
+  const name = prettyName(d.marketingName || a.name) || "cartão";
+  document.getElementById("del-card-name").textContent = `${name}${d.number ? " • final " + d.number : ""}`;
+  openModal("modal-excluir-cartao");
+}
+async function confirmDeleteCard(btn) {
+  const id = cardToDelete;
+  if (!id) return;
+  await withLoading(btn, async () => {
+    try {
+      await api(`/pluggy/accounts/${encodeURIComponent(id)}`, { method: "DELETE" });
+      state.accounts = state.accounts.filter(a => a.account_id !== id);
+      state.transactions = state.transactions.filter(t => t.bank_id !== id);
+      cardToDelete = null;
+      closeAllModals();
+      renderScreen(currentScreen);
+      showToast("Cartão excluído. Ele não volta nas próximas sincronizações.");
+      refreshTransactions().then(() => renderScreen(currentScreen)).catch(() => {});
+    } catch (e) {
+      showToast("Não foi possível excluir: " + e.message, { error: true });
+    }
+  }, { minMs: 300 });
 }
 
 function renderCards() {
@@ -899,9 +997,7 @@ function populateTxFilters() {
   periodoSel.innerHTML = TX_PERIODS.map(p => `<option value="${p.id}">${p.label}</option>`).join("");
   periodoSel.value = txFilterPeriodo;
   const bancoSel = document.getElementById("tx-filter-banco");
-  // cartão não aparece como opção de filtro (só bancos); a exceção é quando o usuário
-  // abriu "Ver transações do cartão", aí a opção existe só enquanto esse filtro estiver ativo
-  const connected = connectedBanks().filter(i => i.type !== "CREDIT" || i.id === txFilterBanco);
+  const connected = connectedBanks();
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
     connected.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
   bancoSel.value = txFilterBanco;
@@ -1405,7 +1501,7 @@ function renderComparacao() {
 /* ============================================================
    MODALS
    ============================================================ */
-function openModal(id) { closeAllModals(); document.getElementById(id).classList.add("active"); }
+function openModal(id) { closeAllModals(); document.getElementById("toast")?.classList.remove("show"); document.getElementById(id).classList.add("active"); }
 
 // Aviso não-bloqueante no rodapé da tela. Diferente de alert(), não trava a thread —
 // então a tela já mostra os dados atualizados por trás dele (ex: contas recém-sincronizadas).
@@ -1417,7 +1513,8 @@ function showToast(msg, { error = false, ms = 5000 } = {}) {
   el.textContent = msg;
   el.classList.toggle("toast-error", error);
   el.classList.add("show");
-  toastTimer = setTimeout(() => el.classList.remove("show"), ms);
+  if (!el.dataset.wired) { el.dataset.wired = "1"; el.addEventListener("click", () => el.classList.remove("show")); }
+  toastTimer = setTimeout(() => el.classList.remove("show"), error ? Math.max(ms, 7000) : ms);
 }
 function closeAllModals() { document.querySelectorAll(".modal-overlay").forEach(m => m.classList.remove("active")); }
 
@@ -1542,6 +1639,7 @@ function renderPluggyItems() {
           <div class="inst-acc-amount">${val !== null ? fmtBRL(val) : "—"}</div>
           <div class="inst-acc-label">${isCard ? "Limite usado" : "Saldo"}</div>
         </div>
+        ${isCard ? `<button type="button" class="acc-del" data-card-del="${esc(a.account_id)}" title="Excluir cartão" aria-label="Excluir cartão ${esc(accountLabel(a))}">${TRASH_SVG}</button>` : ""}
       </div>`;
     }).join("") : `<div class="inst-empty">Nenhuma conta carregada ainda. Clique em Sincronizar.</div>`;
     return `<div class="inst-conn">
@@ -1568,6 +1666,7 @@ function maskCpf(cpf) {
 }
 
 let pluggyPendingCpf = null;
+const SYNC_TIMEOUT_MS = 120000;
 
 function openPluggyCpfModal() {
   const cpfInput = document.getElementById("input-pluggy-cpf");
@@ -1606,7 +1705,7 @@ async function startPluggyConnect() {
   // bolinhas no botão principal enquanto o servidor gera o token (na primeira vez pode demorar)
   await withLoading(document.getElementById("btn-pluggy-connect"), async () => {
     try {
-      const { connectToken } = await api("/pluggy/connect-token", { method: "POST" });
+      const { connectToken } = await api("/pluggy/connect-token", { method: "POST", timeout: 60000 });
       const pluggyConnect = new PluggyConnect({
         connectToken,
         includeSandbox: false, // false = só conectores reais (MeuPluggy e bancos); true mostra os bancos fake de teste
@@ -1614,7 +1713,7 @@ async function startPluggyConnect() {
           showScreenLoader();
           try {
             await api("/pluggy/items", {
-              method: "POST",
+              method: "POST", timeout: 60000,
               body: {
                 itemId: itemData.item.id,
                 cpf: pluggyPendingCpf,
@@ -1624,10 +1723,10 @@ async function startPluggyConnect() {
             // logo após conectar, o Pluggy pode levar alguns segundos para deixar as contas
             // prontas (status "UPDATING"). O servidor já espera um pouco, mas se ainda assim
             // vier vazio, tenta de novo silenciosamente antes de desistir e mostrar "conectado".
-            let r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" });
+            let r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST", timeout: SYNC_TIMEOUT_MS });
             for (let tent = 0; !r.contasEncontradas && tent < 3; tent++) {
               await new Promise(res => setTimeout(res, 3000));
-              try { r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" }); }
+              try { r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST", timeout: SYNC_TIMEOUT_MS }); }
               catch (e) { break; }
             }
             await refreshAfterSync();
@@ -1663,16 +1762,23 @@ async function syncPluggyItem(itemId, { quiet = false } = {}) {
   if (syncingNow.has(itemId)) return null;
   syncingNow.add(itemId);
   try {
-    const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
+    const r = await api(`/pluggy/sync/${itemId}`, { method: "POST", timeout: SYNC_TIMEOUT_MS });
     if (!quiet) {
       await refreshAfterSync();
-      let msg = `Sincronizado! ${r.novas ?? 0} novas • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`;
+      let msg = `Sincronizado! ${r.novas ?? 0} nova${r.novas === 1 ? "" : "s"} • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"}.`;
+      let isErr = false;
       if (!r.contasEncontradas) {
+        isErr = true;
         msg = r.item?.status === "UPDATING"
-          ? "O banco ainda está processando essa conexão. Espera um minuto e toca em Sincronizar de novo."
+          ? "O banco ainda está processando essa conexão. Espere um minuto e sincronize de novo."
           : `O Pluggy não devolveu nenhuma conta ainda.${r.item?.erro ? " Erro: " + r.item.erro : ""}`;
+      } else if (r.erros?.length) {
+        isErr = true;
+        msg = `Contas atualizadas, mas não deu para ler as transações de: ${r.erros.map(x => x.split(":")[0]).join(", ")}. Tente sincronizar de novo.`;
+      } else if (!r.transacoesProcessadas) {
+        msg = "Contas atualizadas. O banco ainda não enviou transações; isso pode levar alguns minutos.";
       }
-      showToast(msg, { error: !r.contasEncontradas });
+      showToast(msg, { error: isErr, ms: isErr ? 9000 : 5000 });
     }
     return r;
   } catch (e) {
@@ -1813,6 +1919,9 @@ document.addEventListener("DOMContentLoaded", () => {
     applyHideUI();
     document.getElementById("btn-ver-entradas").addEventListener("click", () => openEntradasSaidas("entrada"));
     document.getElementById("btn-ver-saidas").addEventListener("click", () => openEntradasSaidas("saida"));
+    ["btn-ver-entradas", "btn-ver-saidas"].forEach(id => document.getElementById(id).addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); }
+    }));
   }, "filtros do dashboard");
 
   wire(() => {
@@ -1840,12 +1949,17 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-pluggy-continuar").addEventListener("click", startPluggyConnect);
     document.getElementById("btn-sync-all")?.addEventListener("click", (e) => withLoading(e.currentTarget, () => syncAllPluggy(), { minMs: 0 }));
     document.getElementById("pluggy-items-list").addEventListener("click", (e) => {
+      const delBtn = e.target.closest("[data-card-del]");
+      if (delBtn) { askDeleteCard(delBtn.dataset.cardDel); return; }
       const syncBtn = e.target.closest("[data-pluggy-sync]");
       const removeBtn = e.target.closest("[data-pluggy-remove]");
       if (syncBtn) withLoading(syncBtn, () => syncPluggyItem(syncBtn.dataset.pluggySync), { minMs: 0 });
       if (removeBtn) withLoading(removeBtn, () => removePluggyItem(removeBtn.dataset.pluggyRemove));
     });
+    document.getElementById("btn-confirmar-excluir-cartao")?.addEventListener("click", (e) => confirmDeleteCard(e.currentTarget));
     document.getElementById("cards-list").addEventListener("click", (e) => {
+      const delBtn = e.target.closest("[data-card-del]");
+      if (delBtn) { askDeleteCard(delBtn.dataset.cardDel); return; }
       const b = e.target.closest("[data-card-tx]");
       if (!b) return;
       txFilterBanco = b.dataset.cardTx; txVisibleCount = TX_PAGE_SIZE;

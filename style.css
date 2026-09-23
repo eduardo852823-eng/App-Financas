@@ -436,7 +436,7 @@ a{text-decoration:none; color:inherit;}
 
 /* demo badge */
 .demo-badge{
-  display:inline-block; background:rgba(var(--accent-rgb),.12); color:var(--blue); font-size:11.5px; font-weight:700;
+  display:inline-block; background:#FFF4DE; color:#B36B00; font-size:11.5px; font-weight:700;
   padding:5px 10px; border-radius:20px; margin-bottom:14px;
 }
 
@@ -726,7 +726,7 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 [data-theme="dark"] .topbar{background:rgba(21,30,46,0.92);}
 [data-theme="dark"] .bottom-nav{background:var(--card-bg); box-shadow:0 -2px 14px rgba(0,0,0,0.5); border-top:1px solid rgba(255,255,255,0.06);}
 [data-theme="dark"] .modal-overlay{background:rgba(0,0,0,0.6);}
-[data-theme="dark"] .demo-badge{background:rgba(var(--accent-rgb),.18); color:var(--blue);}
+[data-theme="dark"] .demo-badge{background:#3A2E12; color:#F5C56B;}
 [data-theme="dark"] .btn-outline{background:var(--card-bg); color:var(--text-main); border-color:rgba(255,255,255,0.14);}
 [data-theme="dark"] .add-bank-chip{border-color:rgba(255,255,255,0.18);}
 [data-theme="dark"] .inv-row{border-top-color:rgba(255,255,255,0.08);}
@@ -819,90 +819,138 @@ body{overscroll-behavior-y:none;}
 
 
 /* ============================================================
-   PADRONIZAÇÃO VISUAL — todas as telas seguem o visual da Início
-   (mesmas superfícies, bordas, raios, sombras, campos e cores)
+   v4 — TELA INICIAL NOVA, AVISOS LEGÍVEIS, EXCLUIR CARTÃO
+   (fica no fim do arquivo para valer sobre as regras antigas;
+    usa as variáveis de cor, então acompanha a paleta escolhida)
    ============================================================ */
-:root{
-  --surface-border:1px solid rgba(15,42,68,0.07);
-  --surface-radius:16px;
+
+/* ---- avisos (toast): antes, no modo escuro, o texto era azul-escuro em fundo azul-escuro ---- */
+.toast{
+  bottom:calc(84px + env(safe-area-inset-bottom, 0px)); max-width:400px; z-index:250;
+  padding:13px 16px 13px 16px; border-radius:16px; font-size:14px; font-weight:500; line-height:1.45;
+  background:#0F2A44; color:#FFFFFF; border:1px solid rgba(255,255,255,.08); border-left:4px solid var(--blue);
+  box-shadow:0 12px 32px rgba(0,0,0,.35);
 }
-[data-theme="dark"]{ --surface-border:1px solid rgba(255,255,255,0.07); }
+.toast.show{pointer-events:auto; cursor:pointer;}
+[data-theme="dark"] .toast{background:#28374F; color:#F3F7FD; border:1px solid rgba(255,255,255,.14); border-left:4px solid var(--blue);}
+.toast.toast-error{background:#7F1D1D; color:#FFFFFF; border:1px solid rgba(255,255,255,.1); border-left:4px solid #FCA5A5;}
+[data-theme="dark"] .toast.toast-error{background:#4C1D24; color:#FFE9EA; border:1px solid rgba(252,165,165,.25); border-left:4px solid #FCA5A5;}
 
-/* superfícies: mesmo cartão em qualquer tela */
-.card, .tx-row, .bank-row, .cat-row, .bank-chip, .inst-conn, .inv-bank,
-.credit-card-item, .search-box, .review-banner, .catdet-head{
-  background:var(--card-bg);
-  border:var(--surface-border);
-  border-radius:var(--surface-radius);
-  box-shadow:var(--shadow);
+/* ---- início: bloco do saldo ---- */
+.hero{
+  position:relative; overflow:hidden; border-radius:26px; padding:20px 20px 0; margin-bottom:12px;
+  background:color-mix(in srgb, var(--blue) 6%, var(--card-bg));
+  border:1px solid rgba(var(--accent-rgb), .2); box-shadow:var(--shadow);
 }
-.review-banner{border-style:solid;}
-.card-balance{border:none; border-radius:20px;}
-.card-mini{border-radius:var(--surface-radius);}
-.tx-row, .cat-row, .bank-row{padding:14px 16px;}
-.inst-conn{padding:16px;}
-.inst-acc{background:var(--bg-soft); border:var(--surface-border); box-shadow:none; border-radius:12px;}
-.credit-card-item{overflow:hidden;}
-
-/* cartões de resumo (entrou/saiu/sobrou) iguais aos da Início em Relatórios */
-.card-green, .card-red{border-left-width:4px;}
-.card-result{border-left:4px solid var(--blue);}
-.card-result .mini-label{color:var(--text-secondary);}
-
-/* campos e seletores iguais em todas as telas */
-.filters-row select, .filters-grid select, #comp-mes1, #comp-mes2, #comp-tipo,
-.modal-body input, .modal-body select{
-  background:var(--card-bg); color:var(--text-main);
-  border:1.5px solid var(--gray-300); border-radius:12px;
-  padding:12px 14px; font-weight:500;
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--blue) 10%, var(--card-bg)); border-color:rgba(var(--accent-rgb), .28);}
+.hero-top{display:flex; align-items:flex-start; justify-content:space-between; gap:12px;}
+.hero .greeting{font-size:16px; font-weight:700; color:var(--text-main); letter-spacing:-.2px;}
+.hero-sub{font-size:12.5px; color:var(--text-secondary); margin-top:3px;}
+.hero-label{font-size:13px; font-weight:600; color:var(--text-secondary); margin-top:22px;}
+.hero-value{
+  font-size:clamp(38px, 11.5vw, 50px); font-weight:800; letter-spacing:-1.6px; line-height:1.05; margin-top:4px;
+  color:var(--text-main); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.filters-row select:focus, .filters-grid select:focus, #comp-mes1:focus, #comp-mes2:focus, #comp-tipo:focus,
-.modal-body input:focus, .modal-body select:focus, .search-box:focus-within{
-  outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(var(--accent-rgb),.15);
+.hero-value .cur{font-size:.36em; font-weight:700; letter-spacing:0; color:var(--text-secondary); margin-right:.45em; vertical-align:.62em;}
+.hero-value .cents{font-size:.5em; font-weight:700; letter-spacing:-.4px; color:var(--text-secondary);}
+.hero-flow{display:block; width:calc(100% + 40px); height:70px; margin:8px -20px 0;}
+.hero .eye-btn{background:var(--gray-100); color:var(--text-main); width:38px; height:38px; flex:none;}
+.hero .eye-btn:active{transform:scale(.92);}
+
+.flow-tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;}
+.flow-tile{
+  display:flex; align-items:center; gap:10px; min-width:0; padding:14px 12px; border-radius:20px;
+  background:var(--card-bg); border:1px solid rgba(128,128,128,.16); cursor:pointer;
+  transition:transform .15s ease, border-color .2s ease;
 }
-.search-box{padding:12px 14px;}
-.search-box input{border:none; box-shadow:none; padding:0; background:transparent;}
-.btn-filter-toggle{border:var(--surface-border); border-radius:14px; width:44px; height:44px;}
+.flow-tile:active{transform:scale(.97);}
+.flow-tile:focus-visible{outline:2px solid var(--blue); outline-offset:2px;}
+.flow-ico{width:34px; height:34px; border-radius:50%; display:grid; place-items:center; flex:none;}
+.flow-tile.in .flow-ico{background:rgba(34,197,94,.16); color:var(--green);}
+.flow-tile.out .flow-ico{background:rgba(229,72,77,.16); color:var(--out);}
+.flow-txt{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.flow-tile .mini-label{font-size:12px; color:var(--text-secondary); font-weight:600;}
+.flow-tile .mini-value{font-size:16px; font-weight:800; color:var(--text-main); letter-spacing:-.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums;}
 
-/* títulos de seção e textos de apoio iguais aos da Início */
-.section-head h3, .inv-bank-head h3, .inst-conn-title{color:var(--navy); font-weight:700;}
-.tx-month-label{color:var(--text-secondary); font-weight:700; letter-spacing:.2px;}
-.screen-hint{color:var(--text-secondary);}
+.flow-bar{display:flex; gap:3px; height:6px; margin:0 4px 10px;}
+.flow-bar span{display:block; height:100%; border-radius:99px; transition:width .5s cubic-bezier(.2,.8,.2,1), opacity .3s;}
+.flow-bar #flow-in{background:var(--green);}
+.flow-bar #flow-out{background:var(--out);}
+.flow-bar.empty span{opacity:.25;}
+.flow-hint{margin-bottom:18px;}
 
-/* abas segmentadas */
-.segmented{border-radius:14px; border:var(--surface-border);}
-.seg-btn.active{color:var(--blue); box-shadow:var(--shadow);}
+.screen-dashboard .filters-row{gap:8px; margin-bottom:22px;}
+.screen-dashboard .filters-row select{
+  border-radius:999px; padding:10px 30px 10px 14px; font-size:16px; font-weight:500; min-width:0;
+  border:1px solid rgba(128,128,128,.24); background-color:var(--card-bg); color:var(--text-main);
+  -webkit-appearance:none; appearance:none; text-overflow:ellipsis;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%238CA0BC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 12px center;
+}
+.screen-dashboard .section-head{margin:2px 2px 12px;}
+.screen-dashboard .section-head h3{font-size:16px; font-weight:800; letter-spacing:-.2px; color:var(--text-main);}
 
-/* barra de baixo e topo com a mesma borda sutil */
-.topbar{box-shadow:none; border-bottom:var(--surface-border);}
-.bottom-nav{border-top:var(--surface-border); box-shadow:0 -6px 20px rgba(15,30,56,.06);}
-[data-theme="dark"] .bottom-nav{box-shadow:0 -6px 20px rgba(0,0,0,.45);}
+/* ---- seus bancos ---- */
+.screen-dashboard .banks-scroll{gap:10px; margin:0 -18px 26px; padding:2px 18px 8px; scroll-snap-type:x proximity;}
+.screen-dashboard .bank-chip{
+  min-width:136px; padding:14px; border-radius:20px; box-shadow:none; animation:none; scroll-snap-align:start;
+  border:1px solid rgba(128,128,128,.16);
+}
+.screen-dashboard .bank-chip .bank-icon{width:38px; height:38px; border-radius:11px; margin-bottom:16px;}
+.screen-dashboard .bank-chip .bank-amount{font-size:15.5px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums;}
+.screen-dashboard .add-bank-chip{border:1.5px dashed rgba(128,128,128,.4); background:transparent;}
 
-/* botões: mesmo formato em todas as telas */
-.btn{border-radius:14px;}
-.btn-connect{border-radius:999px;}
-.btn-outline{border:1.5px solid var(--gray-300);}
-.card-tx-btn{border-radius:12px;}
+/* ---- cartões de crédito ---- */
+.credit-card-item{border-radius:22px; box-shadow:var(--shadow); border:1px solid rgba(128,128,128,.14);}
+.credit-card-top{position:relative; padding:20px 52px 18px; overflow:hidden;}
+.credit-card-top::after{content:""; position:absolute; inset:0; background:rgba(0,0,0,.14); pointer-events:none;}
+.credit-card-top > *{position:relative; z-index:1;}
+.credit-card-name{font-size:16px; letter-spacing:-.2px;}
+.credit-card-sub{font-size:12px;}
+.cc-del{
+  position:absolute !important; top:10px; right:10px; z-index:2 !important; width:36px; height:36px; border-radius:50%; border:none;
+  background:rgba(0,0,0,.28); color:#fff; display:grid; place-items:center; cursor:pointer;
+}
+.cc-del:active{transform:scale(.9);} .cc-del:hover{background:rgba(0,0,0,.45);}
+.credit-card-body{padding:14px 16px 16px;}
+.limit-bar{height:7px;}
+.limit-highlight{border-radius:14px; padding:10px 8px;}
+.limit-highlight-value{font-variant-numeric:tabular-nums;}
+.cc-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px;}
+.cc-actions .btn-connect{margin:0; width:100%; padding:10px 8px; border-radius:14px;}
+.btn-connect.danger{border-color:var(--out); color:var(--out); background:transparent;}
+.acc-del{
+  flex:none; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; cursor:pointer;
+  border:1px solid rgba(128,128,128,.3); background:transparent; color:var(--text-secondary);
+}
+.acc-del:hover, .acc-del:active{color:var(--out); border-color:var(--out);}
 
-/* valores positivos/negativos sempre com as mesmas cores do tema */
-.tx-value.pos, .es-bank-total.pos, .detalhe-value.pos, .rev-value.pos, .comp-diff.down{color:var(--green);}
-.tx-value.neg, .es-bank-total.neg, .detalhe-value.neg, .rev-value.neg, .comp-diff.up{color:var(--out);}
+/* ---- confirmar exclusão ---- */
+.del-card-name{font-size:16px; font-weight:800; margin-bottom:8px; overflow-wrap:anywhere;}
+.del-card-text{font-size:14px; line-height:1.55; color:var(--text-secondary);}
+[data-theme="dark"] .del-card-text{color:#C3CFE2;}
+.del-card-actions{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.del-card-actions .btn{margin-top:20px !important;}
+.del-card-actions .btn-danger{background:#DC2626; color:#fff; border:none; box-shadow:0 8px 20px rgba(220,38,38,.3);}
 
-/* ícones (tx, categoria, banco) com o mesmo raio */
-.tx-icon, .cat-icon, .bank-avatar{border-radius:12px;}
-
-/* linhas internas dos cards de Relatórios/Investimentos */
-.bank-line-row, .inv-row, .kv-row{border-color:var(--gray-100);}
-[data-theme="dark"] .bank-line-row, [data-theme="dark"] .kv-row{border-color:rgba(255,255,255,.08);}
-
-/* tela de créditos */
-.credits-card{border:var(--surface-border);}
-.howto{border:var(--surface-border);}
-
-/* hover só onde há mouse, para não "grudar" no celular */
-@media (hover:none){
-  .card:hover, .tx-row:hover, .bank-row:hover, .cat-row:hover, .bank-chip:hover{transform:none; box-shadow:var(--shadow);}
+/* ---- correções visuais ---- */
+@media (hover:none){ .card:hover{transform:none; box-shadow:var(--shadow);} }
+.card-balance, .bank-chip, .screen-dashboard .flow-tile{animation:none;}
+@media (min-width:820px){
+  .screen-dashboard{display:block; max-width:640px; margin:0 auto;}
+}
+@media (max-width:360px){
+  .flow-tiles{grid-template-columns:1fr;}
+  .credit-card-top{padding-left:44px; padding-right:44px;}
+}
+@media (prefers-reduced-motion:reduce){
+  *, *::before, *::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important;}
+  .dots-spinner i{animation-duration:.9s !important; animation-iteration-count:infinite !important;}
 }
 
-/* seleção de categoria segue a cor do tema (antes era azul fixo) */
-.cat-grid-item.selected{background:rgba(var(--accent-rgb),.10);}
+/* ícones da barra de cima legíveis no modo escuro (estavam verde-escuro sobre cinza-escuro) */
+[data-theme="dark"] .theme-toggle-btn, [data-theme="dark"] .avatar-btn{color:var(--text-main);}
+
+/* nomes de conta/cartão não ficam mais cortados ("Cartão Ca…") na tela Meus bancos */
+.inst-acc-name{white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; line-height:1.25;}
+.inst-acc-value{flex:none;}
