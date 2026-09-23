@@ -1038,7 +1038,8 @@ async function syncPluggyItemData(item, headers) {
   const statements = accounts.map(acc => ({
     sql: `INSERT INTO pluggy_accounts (account_id, user_id, item_id, name, type, balance, updated_at, data, bills)
           VALUES (?,?,?,?,?,?, datetime('now'), ?, ?)
-          ON CONFLICT(account_id) DO UPDATE SET name = excluded.name, type = excluded.type, balance = excluded.balance,
+          ON CONFLICT(account_id) DO UPDATE SET user_id = excluded.user_id, item_id = excluded.item_id,
+            name = excluded.name, type = excluded.type, balance = excluded.balance,
             updated_at = excluded.updated_at, data = excluded.data, bills = excluded.bills`,
     args: [
       acc.id, item.user_id, item.item_id, acc.name || null, acc.type || null,
