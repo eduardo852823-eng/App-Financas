@@ -1,7 +1,7 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "FinanHub backend — Express + Turso (libSQL) + Pluggy",
+  "description": "Fluxo backend — Express + Turso (libSQL) + Pluggy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

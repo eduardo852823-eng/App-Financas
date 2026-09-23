@@ -1,5 +1,5 @@
 /* ============================================================
-   FinanApp — front-end
+   Fluxo — front-end
    Agora conectado a um backend real (Node + Express + SQLite).
    Só o token de login fica no localStorage; todo o resto (perfil,
    saldo, bancos, transações, preferências) vive no banco de dados.
@@ -711,25 +711,24 @@ function renderInvestimentos() {
     list.innerHTML = `<div class="empty-state">Nenhum banco conectado tem investimentos. Se você investe e não aparece, toque em Sincronizar em "Meus bancos".</div>`;
     return;
   }
-  const agoTotals = invs.map(v => invBalanceAgo(v.inv_id));
-  const allAgo = agoTotals.every(Boolean);
-  const agoSum = allAgo ? agoTotals.reduce((s, a) => s + a.balance, 0) : null;
-  document.getElementById("inv-change").innerHTML = deltaHtml(total, allAgo ? { balance: agoSum, day: agoTotals[0].day, since: agoTotals.some(a => a.since) } : null);
+  const yieldOf = (v) => (v.amount_original != null ? v.balance - v.amount_original : (v.profit != null ? v.profit : null));
+  const known = invs.filter(v => yieldOf(v) !== null);
+  const totalYield = known.reduce((s, v) => s + yieldOf(v), 0);
+  const fmtYield = (y) => `<span class="inv-delta ${y >= 0 ? "pos" : "neg"}">${y >= 0 ? "+" : "-"}${fmtBRL(Math.abs(y))}</span>`;
+  document.getElementById("inv-change").innerHTML = known.length ? `Rendeu ${fmtYield(totalYield)} até hoje` : "";
   const byItem = {};
   invs.forEach(v => (byItem[v.item_id] = byItem[v.item_id] || []).push(v));
   list.innerHTML = Object.entries(byItem).map(([itemId, arr]) => {
     const sub = arr.reduce((s, v) => s + v.balance, 0);
     const rows = arr.map(v => {
-      const ago = invBalanceAgo(v.inv_id);
-      const aplic = v.amount_original != null ? `Aplicado ${fmtBRL(v.amount_original)}${v.applied_date ? " em " + fmtDate(v.applied_date) : ""}` : (v.applied_date ? "Aplicado em " + fmtDate(v.applied_date) : "");
-      const lucro = v.profit != null ? ` · Rendimento ${fmtBRL(v.profit)}` : "";
+      const y = yieldOf(v);
+      const aplic = v.amount_original != null ? `Aplicado ${fmtBRL(v.amount_original)}` : "";
       return `<div class="inv-row">
         <div class="inv-row-top"><div class="inv-name">${esc(v.name)}</div><div class="inv-bal">${fmtBRL(v.balance)}</div></div>
-        <div class="inv-muted inv-edit-date" data-inv-id="${esc(v.inv_id)}" data-date="${v.applied_date || ""}">${aplic || "Aplicação sem data"}${lucro} ✎</div>
-        <div class="inv-ago">${deltaHtml(v.balance, ago)}</div>
+        <div class="inv-muted">${aplic}${aplic && y !== null ? " · " : ""}${y !== null ? "Rendeu " + fmtYield(y) : ""}</div>
       </div>`;
     }).join("");
-    return `<div class="card inv-bank"><div class="inv-bank-head"><div class="inv-bank-title">${bankLogo("bank-avatar sm", itemTitle(itemId), "#6200EA")}<h3>${esc(itemTitle(itemId))}</h3></div><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
+    return `<div class="card inv-bank"><div class="inv-bank-head"><div class="inv-bank-title">${bankLogo("bank-avatar sm", itemTitle(itemId), "#059669")}<h3>${esc(itemTitle(itemId))}</h3></div><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
   }).join("");
 }
 
@@ -1524,7 +1523,7 @@ async function removePluggyItem(id) {
    EVENT WIRING
    ============================================================ */
 function wire(fn, label) {
-  try { fn(); } catch (err) { console.error(`FinanApp: falha ao configurar "${label}"`, err); }
+  try { fn(); } catch (err) { console.error(`Fluxo: falha ao configurar "${label}"`, err); }
 }
 
 initTheme();

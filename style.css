@@ -1,6 +1,6 @@
 :root{
-  --blue:#2563EB;
-  --blue-dark:#1E3A5F;
+  --blue:#059669;
+  --blue-dark:#064E3B;
   --navy:#0F2A44;
   --white:#FFFFFF;
   --card-bg:#F5F8FC;
@@ -22,8 +22,8 @@
 }
 
 [data-theme="dark"]{
-  --blue:#3B82F6;
-  --blue-dark:#0B1930;
+  --blue:#10B981;
+  --blue-dark:#052E22;
   --navy:#EAF1FF;
   --white:#151E2E;
   --card-bg:#1B2637;
@@ -39,9 +39,9 @@
   --shadow:0 4px 16px rgba(0,0,0,0.45);
   --shadow-md:0 10px 28px rgba(0,0,0,0.55);
 }
-[data-theme="dark"] body{background:radial-gradient(circle at 50% 0%, #16213A 0%, var(--bg-soft) 55%);}
+[data-theme="dark"] body{background:radial-gradient(circle at 50% 0%, #10251F 0%, var(--bg-soft) 55%);}
 [data-theme="dark"] .card, [data-theme="dark"] .modal-card{border:1px solid rgba(255,255,255,0.06);}
-[data-theme="dark"] .btn-primary{box-shadow:0 8px 22px rgba(59,130,246,0.35);}
+[data-theme="dark"] .btn-primary{box-shadow:0 8px 22px rgba(16,185,129,0.35);}
 [data-theme="dark"] .cat-grid-item, [data-theme="dark"] .cat-mini-btn{border-color:rgba(255,255,255,0.08);}
 
 /* modo claro: fundo com leve profundidade (em vez de cor chapada) e cards com contorno sutil */
@@ -49,7 +49,7 @@ body{background:radial-gradient(circle at 50% 0%, #FFFFFF 0%, var(--bg-soft) 65%
 .card, .modal-card{border:1px solid rgba(15,42,68,0.06);}
 .topbar{backdrop-filter:blur(6px); background:rgba(245,248,252,0.92);}
 .card:hover{box-shadow:var(--shadow-md); transform:translateY(-1px);}
-.btn-primary{box-shadow:0 10px 22px rgba(37,99,235,0.22);}
+.btn-primary{box-shadow:0 10px 22px rgba(5,150,105,0.22);}
 .credit-card-item{border:1px solid rgba(15,42,68,0.06);}
 
 *, *::before, *::after{ transition: var(--transition-theme); }
@@ -91,7 +91,7 @@ a{text-decoration:none; color:inherit;}
   justify-content:center;
   align-items:center;
   padding:32px 28px;
-  background:linear-gradient(180deg,#F2F5FB 0%, #DCE4F2 100%);
+  background:linear-gradient(180deg,#F1FBF6 0%, #D6EEE2 100%);
 }
 .screen-login.active{display:flex;}
 .login-wrap{width:100%; max-width:340px; text-align:center;}
@@ -102,10 +102,10 @@ a{text-decoration:none; color:inherit;}
   background:linear-gradient(135deg,var(--blue),var(--blue-dark));
   display:flex; align-items:center; justify-content:center;
   margin-bottom:18px;
-  box-shadow:0 10px 24px rgba(37,99,235,0.28);
+  box-shadow:0 10px 24px rgba(5,150,105,0.28);
 }
 /* antes da fonte Inter carregar o navegador usa a fonte do sistema, que é mais larga —
-   isso fazia o "FinanApp" nascer maior e ficar por um instante atrás do ícone acima.
+   isso fazia o "Fluxo" nascer maior e ficar por um instante atrás do ícone acima.
    Travando a altura da linha e usando uma pilha de fallback parecida evita esse pulo. */
 .login-logo h1{
   position:relative; z-index:1;
@@ -127,8 +127,8 @@ a{text-decoration:none; color:inherit;}
   position:relative; overflow:hidden;
 }
 .btn:active{transform:scale(0.96);}
-.btn-primary{background:var(--blue); color:#fff; box-shadow:0 8px 18px rgba(37,99,235,0.25);}
-.btn-primary:hover{transform:translateY(-2px); box-shadow:0 12px 24px rgba(37,99,235,0.35);}
+.btn-primary{background:var(--blue); color:#fff; box-shadow:0 8px 18px rgba(5,150,105,0.25);}
+.btn-primary:hover{transform:translateY(-2px); box-shadow:0 12px 24px rgba(5,150,105,0.35);}
 .btn-outline{background:var(--card-bg); color:var(--navy); border:1.5px solid var(--gray-300);}
 .btn-outline:hover{transform:translateY(-1px); border-color:var(--blue); color:var(--blue);}
 .btn-danger:hover{transform:translateY(-1px); box-shadow:0 10px 20px rgba(229,72,77,0.3);}
@@ -236,8 +236,8 @@ a{text-decoration:none; color:inherit;}
   }
 }
 .card-balance{
-  background:linear-gradient(135deg,var(--blue) 0%, #1D4ED8 60%, #172554 100%);
-  color:#fff; box-shadow:0 14px 34px rgba(37,99,235,0.32);
+  background:linear-gradient(135deg,var(--blue) 0%, #047857 60%, #064E3B 100%);
+  color:#fff; box-shadow:0 14px 34px rgba(5,150,105,0.32);
   position:relative; overflow:hidden; border-radius:20px;
 }
 .card-balance::before{
@@ -373,7 +373,7 @@ a{text-decoration:none; color:inherit;}
 .cat-grid-item:hover{transform:translateY(-2px); box-shadow:var(--shadow);}
 .cat-grid-item:active{transform:scale(0.96);}
 .cat-grid-item.selected{border-color:var(--blue); background:#EEF4FF; color:var(--blue);}
-[data-theme="dark"] .cat-grid-item.selected{background:rgba(59,130,246,0.16);}
+[data-theme="dark"] .cat-grid-item.selected{background:rgba(16,185,129,0.16);}
 .cat-grid-item .cat-icon{width:32px; height:32px; font-size:13px;}
 .cat-grid-actions{position:absolute; top:4px; right:4px; display:flex; gap:3px; opacity:.85;}
 .cat-mini-btn{
@@ -696,7 +696,7 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .catdet-total.neg{color:var(--red,#EF4444);} .catdet-total.pos{color:var(--green,#10B981);}
 
 .add-bank-chip{cursor:pointer; text-align:left; border:1.5px dashed var(--gray-300,#cbd3e1); background:transparent; font:inherit; color:inherit; min-width:96px;}
-.add-bank-chip .add-icon{background:var(--gray-100,#EEF2F8)!important; color:var(--blue,#6200EA)!important; font-size:20px;}
+.add-bank-chip .add-icon{background:var(--gray-100,#EEF2F8)!important; color:var(--blue,#059669)!important; font-size:20px;}
 .card-balance .inv-muted{color:rgba(255,255,255,.9);}
 .card-balance .inv-delta.pos{color:#7CFFB8;} .card-balance .inv-delta.neg{color:#FFB4B4;}
 

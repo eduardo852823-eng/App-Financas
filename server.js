@@ -1,5 +1,5 @@
 /* ============================================================
-   FinanApp — backend
+   Fluxo — backend
    Node.js + Express + Turso (libSQL)
    Guarda: usuários (login por e-mail ou Google), preferências
    (tema, etc.), instituições conectadas, transações e itens
@@ -1238,7 +1238,7 @@ initDb()
   .then((n) => { if (n) console.log(`[categorias] ${n} transferências que estavam marcadas como salário foram corrigidas`); })
   .then(() => { classifyPendingWithAI().catch(() => {}); })
   .then(() => {
-    app.listen(PORT, () => console.log(`FinanApp backend rodando em http://localhost:${PORT}`));
+    app.listen(PORT, () => console.log(`Fluxo backend rodando em http://localhost:${PORT}`));
   })
   .catch((e) => {
     console.error("Erro ao inicializar o banco:", e);

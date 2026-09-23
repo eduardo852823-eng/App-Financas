@@ -1,8 +1,8 @@
-# FinanHub — como rodar
+# Fluxo — como rodar
 
 ## O que mudou
 - O app agora tem um **backend de verdade** (Node.js + Express) com um
-  **banco de dados SQLite** (`backend/finanhub.db`), que é criado
+  **banco de dados SQLite** (`backend/fluxo.db`), que é criado
   automaticamente na primeira vez que você rodar o servidor.
 - O banco guarda: usuários (nome, e-mail, senha criptografada ou login
   Google), preferências (tema), quais bancos estão conectados e todas
@@ -28,7 +28,7 @@ tokens de login).
 npm start
 ```
 Isso sobe o servidor em `http://localhost:3001`. Na primeira execução
-o arquivo `finanhub.db` é criado automaticamente na pasta `backend/`
+o arquivo `fluxo.db` é criado automaticamente na pasta `backend/`
 — não precisa instalar MySQL, PostgreSQL nem nada externo.
 
 ## 3. Rodar o front-end
@@ -77,5 +77,5 @@ certo para plugar a integração real quando ela existir.
 - No Google Cloud Console, adicione o domínio final do front-end em
   "Authorized JavaScript origins" do client ID usado, senão o login
   Google dá erro `origin_mismatch`.
-- Nunca suba o arquivo `.env` nem o `finanhub.db` para um repositório
+- Nunca suba o arquivo `.env` nem o `fluxo.db` para um repositório
   público — eles têm a chave secreta e os dados dos usuários.
