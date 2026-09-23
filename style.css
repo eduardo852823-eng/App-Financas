@@ -95,7 +95,7 @@ a{text-decoration:none; color:inherit;}
 }
 .screen-login.active{display:flex;}
 .login-wrap{width:100%; max-width:340px; text-align:center;}
-.login-logo{display:flex; flex-direction:column; align-items:center; margin-bottom:56px; position:relative;}
+.login-logo{display:flex; flex-direction:column; align-items:center; margin-bottom:28px; position:relative;}
 .logo-badge{
   position:relative; z-index:2;
   width:64px; height:64px; border-radius:18px; flex:none;
@@ -705,3 +705,29 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .bank-avatar.sm{width:30px; height:30px; border-radius:8px; font-size:11px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800;}
 .inv-bank-title{display:flex; align-items:center; gap:10px;}
 .inv-edit-date{cursor:pointer;}
+
+/* ---- login reorganizado ---- */
+.login-wrap{max-width:340px;}
+.login-logo-img{width:min(220px,62vw); height:auto; border-radius:34px; box-shadow:0 18px 44px rgba(5,150,105,.35), 0 0 0 1px rgba(16,185,129,.25);}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+.login-actions .btn{width:100%;}
+.google-btn-container{width:100%; overflow:hidden;}
+.login-or{display:flex; align-items:center; gap:12px; color:var(--text-secondary); font-size:12.5px; margin:2px 0;}
+.login-or::before,.login-or::after{content:""; flex:1; height:1px; background:var(--gray-300);}
+.btn-install{display:flex; align-items:center; justify-content:center; gap:8px; width:100%; margin-top:10px; padding:12px; border-radius:var(--radius-md); border:1.5px dashed var(--blue); background:transparent; color:var(--blue); font-weight:700; font-size:14px; cursor:pointer;}
+.install-hint{margin-top:10px; font-size:12.5px; color:var(--text-secondary); line-height:1.5;}
+.hidden.btn-install, .hidden.install-hint{display:none;}
+
+/* ---- correções do modo escuro ---- */
+[data-theme="dark"]{color-scheme:dark;}
+[data-theme="dark"] .screen-login{background:radial-gradient(circle at 50% 0%, #0E2A22 0%, #060C14 70%);}
+[data-theme="dark"] .topbar{background:rgba(21,30,46,0.92);}
+[data-theme="dark"] .bottom-nav{background:var(--card-bg); box-shadow:0 -2px 14px rgba(0,0,0,0.5); border-top:1px solid rgba(255,255,255,0.06);}
+[data-theme="dark"] .modal-overlay{background:rgba(0,0,0,0.6);}
+[data-theme="dark"] .demo-badge{background:#3A2E12; color:#F5C56B;}
+[data-theme="dark"] .btn-outline{background:var(--card-bg); color:var(--text-main); border-color:rgba(255,255,255,0.14);}
+[data-theme="dark"] .add-bank-chip{border-color:rgba(255,255,255,0.18);}
+[data-theme="dark"] .inv-row{border-top-color:rgba(255,255,255,0.08);}
+[data-theme="dark"] .login-or::before,[data-theme="dark"] .login-or::after{background:rgba(255,255,255,0.14);}
+[data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea{color:var(--text-main);}
+[data-theme="dark"] input::placeholder{color:var(--text-secondary);}

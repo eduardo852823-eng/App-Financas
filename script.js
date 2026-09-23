@@ -1324,7 +1324,7 @@ function initGoogleLogin() {
   try {
     google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleGoogleCredential, auto_select: false });
     google.accounts.id.renderButton(document.getElementById("google-btn-container"), {
-      theme: "outline", size: "large", width: 296, shape: "pill", text: "continue_with"
+      theme: "outline", size: "large", width: 340, shape: "pill", text: "continue_with"
     });
   } catch (e) {
     console.warn("Não foi possível iniciar o Google Sign-In:", e);
@@ -1527,6 +1527,28 @@ function wire(fn, label) {
 }
 
 initTheme();
+
+/* ---------- PWA: instalar no celular ---------- */
+let deferredInstall = null;
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); deferredInstall = e;
+  document.getElementById("btn-install")?.classList.remove("hidden");
+});
+window.addEventListener("appinstalled", () => { deferredInstall = null; document.getElementById("btn-install")?.classList.add("hidden"); });
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("btn-install");
+  if (!btn || isStandalone()) return;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (ios) document.getElementById("install-hint")?.classList.remove("hidden");
+  btn.addEventListener("click", async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    await deferredInstall.userChoice.catch(() => {});
+    deferredInstall = null; btn.classList.add("hidden");
+  });
+});
 
 document.addEventListener("DOMContentLoaded", () => {
 

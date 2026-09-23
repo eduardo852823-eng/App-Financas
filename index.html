@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Fluxo</title>
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#059669">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fluxo">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -20,20 +27,23 @@
   <section class="screen screen-login active" id="screen-login">
     <div class="login-wrap">
       <div class="login-logo">
-        <div class="logo-badge">
-          <img src="logo.svg" width="34" height="34" alt="Fluxo">
-        </div>
-        <h1>Finan<span>App</span></h1>
-        <p>Todas as suas finanças<br>em um só lugar.</p>
+        <img class="login-logo-img" src="logo.png" alt="Fluxo — seu dinheiro, em movimento" width="220" height="220">
+        <h1 class="sr-only">Fluxo</h1>
       </div>
 
       <div class="login-actions">
         <div id="google-btn-container" class="google-btn-container"></div>
+        <div class="login-or"><span>ou</span></div>
         <button class="btn btn-outline" id="btn-email-login">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
           Entrar com e-mail
         </button>
         <a href="#" class="link-create-account" id="link-create-account">Criar conta</a>
+        <button class="btn-install hidden" id="btn-install" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Instalar o app no celular
+        </button>
+        <p class="install-hint hidden" id="install-hint">No iPhone: toque em <b>Compartilhar</b> e depois em <b>Adicionar à Tela de Início</b>.</p>
       </div>
     </div>
   </section>
