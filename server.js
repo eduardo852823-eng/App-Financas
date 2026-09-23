@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     try { await db.execute(`ALTER TABLE pluggy_accounts ADD COLUMN ${col}`); } catch (e) { /* já existe */ }
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_external ON transactions(user_id, external_id)");
+  // evita transações duplicadas quando dois "Sincronizar" rodam ao mesmo tempo (vários bancos / toques duplos)
+  try {
+    await db.execute("DELETE FROM transactions WHERE external_id IS NOT NULL AND id NOT IN (SELECT MIN(id) FROM transactions WHERE external_id IS NOT NULL GROUP BY user_id, external_id)");
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_tx_user_external ON transactions(user_id, external_id) WHERE external_id IS NOT NULL");
+  } catch (e) { console.error("índice único de transações:", e.message); }
   // investimentos (Pluggy) + histórico diário de saldo para comparar com ~1 mês atrás
   await db.execute(`CREATE TABLE IF NOT EXISTS inv_positions (
     inv_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, item_id TEXT NOT NULL,
@@ -1050,7 +1055,7 @@ async function syncPluggyItemData(item, headers) {
         });
       }
       txStatements.push({
-        sql: `INSERT INTO transactions (user_id, date, desc, bank_id, value, type, category, external_id, account_id, account_name, account_type, pluggy_category, category_source)
+        sql: `INSERT OR IGNORE INTO transactions (user_id, date, desc, bank_id, value, type, category, external_id, account_id, account_name, account_type, pluggy_category, category_source)
               SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
               WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND external_id = ?)`,
         args: [
@@ -1141,9 +1146,13 @@ async function waitPluggyItemReady(itemId, headers, { attempts = 5, delayMs = 25
   return itemInfo;
 }
 
+const syncingItems = new Set(); // uma sincronização por vez para cada conexão
 app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE item_id = ? AND user_id = ?", [req.params.itemId, req.userId]);
   if (!item) return res.status(404).json({ error: "Conexão não encontrada" });
+  if (syncingItems.has(item.item_id)) return res.status(409).json({ error: "Este banco já está sincronizando. Aguarde alguns segundos." });
+  syncingItems.add(item.item_id);
+  try {
 
   const apiKey = await getPluggyApiKey();
   const headers = { "X-API-KEY": apiKey };
@@ -1176,6 +1185,7 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
       erro: itemInfo.error?.message || null
     } : null
   });
+  } finally { syncingItems.delete(item.item_id); }
 }));
 
 /* ============================================================

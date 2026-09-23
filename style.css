@@ -799,3 +799,20 @@ body{overscroll-behavior-y:none;}
 .card{overflow-wrap:anywhere;}
 .banks-scroll{-webkit-overflow-scrolling:touch; scrollbar-width:none;}
 .banks-scroll::-webkit-scrollbar{display:none;}
+
+/* ---- arrastar abas: animação ---- */
+.nav-edit-item{position:relative; transition:transform .2s ease, box-shadow .2s ease, opacity .2s ease; will-change:transform;}
+.nav-edit-item.dragging{z-index:5; cursor:grabbing; box-shadow:0 14px 30px rgba(0,0,0,.35); outline:2px solid var(--blue); opacity:1;}
+.nav-sep{font-size:11px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--text-secondary); padding:8px 4px 0; list-style:none;}
+.nav-editor{touch-action:pan-y;}
+/* ---- avisos legíveis no modo escuro ---- */
+.cfg-hint{font-size:11.5px;}
+[data-theme="dark"] .cfg-hint, [data-theme="dark"] .screen-hint, [data-theme="dark"] .install-hint, [data-theme="dark"] .rel-frase, [data-theme="dark"] .howto ol{color:#C3CFE2; opacity:1;}
+[data-theme="dark"] .nav-sep{color:#C3CFE2;}
+/* ---- cartões centralizados ---- */
+#cards-wrap .section-head{justify-content:center; text-align:center;}
+#cards-list{display:flex; flex-direction:column; align-items:center;}
+.credit-card-item{width:100%; max-width:420px; margin-left:auto; margin-right:auto;}
+.credit-card-top{text-align:center;}
+.limit-highlight-row{justify-content:center; text-align:center;}
+.limit-highlight{text-align:center; flex:1;}

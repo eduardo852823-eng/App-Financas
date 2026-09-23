@@ -345,12 +345,17 @@ function renderBottomNav() {
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${NAV_DEFS[id].svg}</svg>
       <span>${NAV_DEFS[id].label}</span></button>`).join("");
 }
+function normalizeNav(c) { // escondidas sempre no fim da lista
+  c.order = [...c.order.filter(id => !c.hidden.includes(id)), ...c.order.filter(id => c.hidden.includes(id))];
+  return c;
+}
 function renderNavEditor() {
   const el = document.getElementById("nav-editor"); if (!el) return;
-  const c = getNavCfg();
-  el.innerHTML = c.order.map(id => {
+  const c = normalizeNav(getNavCfg());
+  const firstOff = c.order.findIndex(id => c.hidden.includes(id));
+  el.innerHTML = c.order.map((id, i) => {
     const off = c.hidden.includes(id);
-    return `<li class="nav-edit-item${off ? " off" : ""}" data-id="${id}">
+    return (i === firstOff ? `<li class="nav-sep">Escondidas</li>` : "") + `<li class="nav-edit-item${off ? " off" : ""}" data-id="${id}">
       <span class="nav-handle" title="Arraste para mudar a ordem">☰</span>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${NAV_DEFS[id].svg}</svg>
       <span class="nav-edit-name">${NAV_DEFS[id].label}</span>
@@ -358,8 +363,21 @@ function renderNavEditor() {
     </li>`;
   }).join("");
 }
+// anima a troca de lugar dos itens (FLIP): mede antes, muda, e desliza do lugar antigo para o novo
+function flipItems(el, mutate) {
+  const before = new Map([...el.querySelectorAll(".nav-edit-item")].map(li => [li.dataset.id, li.getBoundingClientRect().top]));
+  mutate();
+  el.querySelectorAll(".nav-edit-item").forEach(li => {
+    const old = before.get(li.dataset.id); if (old == null) return;
+    const dy = old - li.getBoundingClientRect().top; if (!dy) return;
+    li.style.transition = "none"; li.style.transform = `translateY(${dy}px)`;
+    void li.offsetWidth;
+    li.style.transition = "transform .22s ease"; li.style.transform = "";
+  });
+}
 function wireNavEditor() {
-  const el = document.getElementById("nav-editor"); if (!el) return;
+  const el = document.getElementById("nav-editor"); if (!el || el.dataset.wired) return;
+  el.dataset.wired = "1";
   el.addEventListener("click", (e) => {
     const b = e.target.closest("[data-toggle]"); if (!b) return;
     const c = getNavCfg(), id = b.dataset.toggle;
@@ -370,25 +388,40 @@ function wireNavEditor() {
       if (c.order.length - c.hidden.length <= 2) { showToast("Deixe pelo menos 2 abas visíveis."); return; }
       c.hidden.push(id);
     }
-    saveNavCfg(c); renderNavEditor();
+    normalizeNav(c); saveNavCfg(c);
+    flipItems(el, renderNavEditor);
   });
-  let drag = null;
+  let drag = null, grab = 0;
+  const place = (y) => {
+    const h = drag.offsetHeight;
+    const others = [...el.querySelectorAll(".nav-edit-item")].filter(li => li !== drag);
+    const center = y - grab + h / 2;
+    const after = others.find(li => { const r = li.getBoundingClientRect(); return center < r.top + r.height / 2; });
+    const tops = new Map(others.map(li => [li, li.getBoundingClientRect().top]));
+    if (after) { if (drag.nextElementSibling !== after) el.insertBefore(drag, after); } else if (drag !== el.lastElementChild) el.appendChild(drag);
+    others.forEach(li => { // os outros deslizam suavemente para abrir espaço
+      const dy = tops.get(li) - li.getBoundingClientRect().top; if (!dy) return;
+      li.style.transition = "none"; li.style.transform = `translateY(${dy}px)`; void li.offsetWidth;
+      li.style.transition = "transform .18s ease"; li.style.transform = "";
+    });
+    drag.style.transform = "none"; const natural = drag.getBoundingClientRect().top;
+    drag.style.transform = `translateY(${y - grab - natural}px) scale(1.03)`;
+  };
   el.addEventListener("pointerdown", (e) => {
     const h = e.target.closest(".nav-handle"); if (!h) return;
-    drag = h.closest(".nav-edit-item"); drag.classList.add("dragging");
-    h.setPointerCapture(e.pointerId); e.preventDefault();
+    drag = h.closest(".nav-edit-item"); grab = e.clientY - drag.getBoundingClientRect().top;
+    drag.classList.add("dragging"); drag.style.transition = "box-shadow .15s ease";
+    h.setPointerCapture(e.pointerId); e.preventDefault(); place(e.clientY);
   });
-  el.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const others = [...el.children].filter(li => li !== drag);
-    const after = others.find(li => { const r = li.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
-    if (after) { if (drag.nextSibling !== after) el.insertBefore(drag, after); } else el.appendChild(drag);
-  });
+  el.addEventListener("pointermove", (e) => { if (drag) place(e.clientY); });
   const end = () => {
     if (!drag) return;
-    drag.classList.remove("dragging"); drag = null;
-    const c = getNavCfg(); c.order = [...el.children].map(li => li.dataset.id);
-    saveNavCfg(c); renderNavEditor();
+    const li = drag; drag = null;
+    li.style.transition = "transform .2s ease, box-shadow .2s ease"; li.style.transform = "translateY(0) scale(1)"; // "solta" no lugar
+    li.classList.remove("dragging");
+    const c = getNavCfg(); c.order = [...el.querySelectorAll(".nav-edit-item")].map(x => x.dataset.id);
+    normalizeNav(c); saveNavCfg(c);
+    setTimeout(renderNavEditor, 220);
   };
   el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
   document.getElementById("btn-nav-reset").addEventListener("click", () => { saveNavCfg(JSON.parse(JSON.stringify(NAV_DEFAULT))); renderNavEditor(); });
@@ -433,10 +466,14 @@ function showLogin() {
 function showApp() {
   document.getElementById("screen-login").classList.remove("active");
   document.getElementById("main-app").classList.add("active");
-  navigateTo("inicio", { refresh: false });
+  const last = localStorage.getItem("lastScreen");
+  navigateTo(last && NAV_DEFS[last] ? last : "inicio", { refresh: last && NAV_DEFS[last] && last !== "inicio" });
   setTimeout(checkReviewPrompt, 700);
+  setTimeout(() => autoSyncAll(), 2500);
 }
 function navigateTo(screen, { refresh = true } = {}) {
+  const remember = screen === "categoria-detalhe" ? "categorias" : screen;
+  if (NAV_DEFS[remember]) localStorage.setItem("lastScreen", remember); // ao reabrir o app volta para onde você parou
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
@@ -664,12 +701,12 @@ function cardHtml(a) {
       ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>` : ""}
       <div class="limit-highlight-row">
         <div class="limit-highlight">
-          <span class="limit-highlight-label">Limite disponível</span>
-          <span class="limit-highlight-value">${money(avail) || "—"}</span>
-        </div>
-        <div class="limit-highlight">
           <span class="limit-highlight-label">Limite total</span>
           <span class="limit-highlight-value">${money(limit) || "—"}</span>
+        </div>
+        <div class="limit-highlight">
+          <span class="limit-highlight-label">Limite disponível</span>
+          <span class="limit-highlight-value">${money(avail) || "—"}</span>
         </div>
       </div>
       ${bill
@@ -1590,8 +1627,7 @@ async function startPluggyConnect() {
               try { r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" }); }
               catch (e) { break; }
             }
-            await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
-            renderScreen(currentScreen);
+            await refreshAfterSync();
             if (!r.contasEncontradas) {
               showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
             } else {
@@ -1615,22 +1651,54 @@ async function startPluggyConnect() {
   });
 }
 
-async function syncPluggyItem(itemId) {
+const syncingNow = new Set();
+async function refreshAfterSync() {
+  await Promise.all([refreshTransactions(), refreshAccounts(), refreshPluggyItems(), refreshInvestments()]);
+  renderScreen(currentScreen);
+}
+async function syncPluggyItem(itemId, { quiet = false } = {}) {
+  if (syncingNow.has(itemId)) return null;
+  syncingNow.add(itemId);
   try {
     const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
-    await Promise.all([refreshTransactions(), refreshAccounts()]);
-    renderScreen(currentScreen);
-    let msg = `Sincronizado! ${r.novas ?? 0} novas • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`;
-    if (!r.contasEncontradas) {
-      msg = r.item?.status === "UPDATING"
-        ? "O banco ainda está processando essa conexão. Espera um minuto e toca em Sincronizar de novo."
-        : `O Pluggy não devolveu nenhuma conta ainda.${r.item?.erro ? " Erro: " + r.item.erro : ""}`;
+    if (!quiet) {
+      await refreshAfterSync();
+      let msg = `Sincronizado! ${r.novas ?? 0} novas • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`;
+      if (!r.contasEncontradas) {
+        msg = r.item?.status === "UPDATING"
+          ? "O banco ainda está processando essa conexão. Espera um minuto e toca em Sincronizar de novo."
+          : `O Pluggy não devolveu nenhuma conta ainda.${r.item?.erro ? " Erro: " + r.item.erro : ""}`;
+      }
+      showToast(msg, { error: !r.contasEncontradas });
     }
-    showToast(msg, { error: !r.contasEncontradas });
+    return r;
   } catch (e) {
-    showToast("Erro ao sincronizar: " + e.message, { error: true });
-  }
+    if (!quiet) showToast("Erro ao sincronizar: " + e.message, { error: true });
+    return null;
+  } finally { syncingNow.delete(itemId); }
 }
+// Sincroniza todos os bancos, um de cada vez (evita um banco atropelar o outro)
+async function syncAllPluggy({ quiet = false } = {}) {
+  const items = [...(state.pluggyItems || [])];
+  if (!items.length) { if (!quiet) showToast("Nenhum banco conectado ainda."); return; }
+  let novas = 0, falhas = 0;
+  for (const it of items) {
+    const r = await syncPluggyItem(it.item_id, { quiet: true });
+    if (r) novas += r.novas || 0; else falhas++;
+  }
+  localStorage.setItem("lastAutoSync", String(Date.now()));
+  await refreshAfterSync();
+  if (!quiet) showToast(falhas ? `Sincronizado com ${falhas} falha${falhas === 1 ? "" : "s"}. Tente de novo nos bancos que não atualizaram.` : `Tudo sincronizado! ${novas} nova${novas === 1 ? "" : "s"} transaç${novas === 1 ? "ão" : "ões"}.`, { error: !!falhas });
+}
+// Ao abrir o app (e ao voltar para ele), atualiza sozinho se faz mais de 10 minutos
+let autoSyncing = false;
+async function autoSyncAll() {
+  if (autoSyncing || !state.user || !(state.pluggyItems || []).length) return;
+  if (Date.now() - Number(localStorage.getItem("lastAutoSync") || 0) < 10 * 60 * 1000) return;
+  autoSyncing = true; showScreenLoader();
+  try { await syncAllPluggy({ quiet: true }); } finally { autoSyncing = false; hideScreenLoader(); }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoSyncAll(); });
 
 async function removePluggyItem(id) {
   if (!confirm("Remover esta conexão? As transações dela também serão apagadas do app.")) return;
@@ -1767,6 +1835,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-pluggy-connect").addEventListener("click", openPluggyCpfModal);
     document.getElementById("input-pluggy-cpf").addEventListener("input", (e) => formatCpfInput(e.target));
     document.getElementById("btn-pluggy-continuar").addEventListener("click", startPluggyConnect);
+    document.getElementById("btn-sync-all")?.addEventListener("click", (e) => withLoading(e.currentTarget, () => syncAllPluggy(), { minMs: 0 }));
     document.getElementById("pluggy-items-list").addEventListener("click", (e) => {
       const syncBtn = e.target.closest("[data-pluggy-sync]");
       const removeBtn = e.target.closest("[data-pluggy-remove]");
