@@ -97,7 +97,7 @@
       <!-- ---------- DASHBOARD ---------- -->
       <section class="screen screen-dashboard active" data-screen="inicio">
         <p class="greeting" id="greeting-text">Olá!</p>
-        <p class="subtext">Aqui está um resumo das suas finanças.</p>
+        <p class="subtext">Aqui está um resumo das suas finanças. O <b>saldo total</b> é a soma do dinheiro que está nas suas contas agora.</p>
 
         <div class="card card-balance">
           <div class="card-balance-top">
@@ -122,6 +122,7 @@
           </div>
         </div>
 
+        <p class="screen-hint">Toque em <b>Entradas</b> ou <b>Saídas</b> para ver a lista. Use o olho no card de saldo para esconder os valores.</p>
         <div class="filters-row">
           <select id="filter-periodo"></select>
           <select id="filter-banco"></select>
@@ -160,6 +161,7 @@
 
       <!-- ---------- TRANSAÇÕES ---------- -->
       <section class="screen screen-transacoes" data-screen="transacoes">
+        <p class="screen-hint">Todas as movimentações das suas contas. Toque em uma para ver os detalhes ou trocar a categoria.</p>
         <div class="search-row">
           <div class="search-box">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -175,6 +177,7 @@
 
       <!-- ---------- CATEGORIAS ---------- -->
       <section class="screen screen-categorias" data-screen="categorias">
+        <p class="screen-hint">Mostra para onde vai o seu dinheiro. Toque numa categoria (na lista ou na legenda) para ver só as transações dela.</p>
         <div class="section-head">
           <h3>Categorias</h3>
           <a href="#" class="link-small" id="btn-nova-categoria">+ Nova categoria</a>
@@ -195,6 +198,29 @@
         <div id="catdet-container"></div>
       </section>
 
+      <!-- ---------- CRÉDITOS ---------- -->
+      <section class="screen screen-creditos" data-screen="creditos">
+        <div class="card credits-card">
+          <img src="logo.png" alt="Fluxo" class="credits-logo" width="120" height="120">
+          <h2>Fluxo</h2>
+          <p class="screen-hint" style="margin:0">Seu dinheiro, em movimento.</p>
+          <div class="credit-line"><span>Criado por</span><strong>Eduardo</strong></div>
+          <div class="credit-line"><span>Desenvolvido com</span><strong>Claude (Anthropic)</strong></div>
+          <div class="credit-line"><span>Conexão com bancos</span><strong>Pluggy • Open Finance</strong></div>
+        </div>
+        <div class="section-head"><h3>Como usar o Fluxo</h3></div>
+        <div class="card howto">
+          <ol>
+            <li><b>Conecte seus bancos</b> em "Meus bancos" (menu do perfil). O app só lê os dados, nunca guarda sua senha.</li>
+            <li><b>Início:</b> veja o saldo, quanto entrou e saiu, e seus cartões.</li>
+            <li><b>Transações:</b> toque numa transação para trocar a categoria.</li>
+            <li><b>Categorias:</b> toque numa categoria para ver só os gastos ou ganhos dela.</li>
+            <li><b>Investimentos:</b> acompanhe o que está aplicado e quanto rendeu.</li>
+            <li><b>Configurações:</b> mude a cor do app e a ordem das abas de baixo.</li>
+          </ol>
+        </div>
+      </section>
+
       <!-- ---------- INVESTIMENTOS ---------- -->
       <section class="screen screen-investimentos" data-screen="investimentos">
         <div class="card card-balance">
@@ -202,11 +228,13 @@
           <div class="card-balance-value" id="inv-total">R$ 0,00</div>
           <div class="card-balance-sub" id="inv-change">—</div>
         </div>
+        <p class="screen-hint">Dinheiro aplicado nos bancos conectados. <b>Rendeu</b> = valor de hoje menos o que você aplicou.</p>
         <div id="inv-list"></div>
       </section>
 
       <!-- ---------- RELATÓRIOS ---------- -->
       <section class="screen screen-relatorios" data-screen="relatorios">
+        <p class="screen-hint">Escolha um mês para ver quanto entrou, quanto saiu e quanto sobrou. Em "Comparar meses" você vê a diferença entre dois meses.</p>
         <div class="segmented" id="rel-segmented">
           <button class="seg-btn active" data-seg="geral">Resumo</button>
           <button class="seg-btn" data-seg="comparar">Comparar meses</button>
@@ -444,6 +472,10 @@
           <button class="profile-menu-item" data-nav="investimentos" data-close-modal>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>
             Investimentos
+          </button>
+          <button class="profile-menu-item" data-nav="creditos" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0112 6a5.2 5.2 0 019.3 6c-2.3 4.4-9.3 9-9.3 9z"/></svg>
+            Créditos
           </button>
           <div class="profile-menu-sep"></div>
           <button class="profile-menu-item" id="btn-configuracoes" data-close-modal>

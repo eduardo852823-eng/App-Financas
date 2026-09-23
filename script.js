@@ -300,6 +300,8 @@ function applyAccent() {
   const [base, deep1, mid, deep, rgb] = ACCENTS[currentAccent()][dark ? "dark" : "light"];
   const st = document.documentElement.style;
   st.setProperty("--blue", base); st.setProperty("--blue-dark", deep1);
+  const out = { vermelho: dark ? "#FBBF24" : "#D97706", rosa: dark ? "#F87171" : "#E5484D" }[currentAccent()] || (dark ? "#FB7185" : "#E5484D");
+  st.setProperty("--out", out);
   st.setProperty("--accent-mid", mid); st.setProperty("--accent-deep", deep); st.setProperty("--accent-rgb", rgb);
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ACCENTS[currentAccent()].light[0]);
 }
@@ -317,16 +319,18 @@ const NAV_DEFS = {
   categorias:   { label: "Categorias",    svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>' },
   relatorios:   { label: "Relatórios",    svg: '<path d="M4 19V9M12 19V5M20 19v-7"/>' },
   investimentos:{ label: "Investimentos", svg: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>' },
+  creditos:     { label: "Créditos",      svg: '<path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0112 6a5.2 5.2 0 019.3 6c-2.3 4.4-9.3 9-9.3 9z"/>' },
   bancos:       { label: "Meus bancos",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
 };
-const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","relatorios","investimentos","bancos"], hidden: ["bancos"] };
+const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","relatorios","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
 function getNavCfg() {
   try {
     const c = JSON.parse(localStorage.getItem("navCfg") || "null");
     if (c && Array.isArray(c.order)) {
       const order = c.order.filter(id => NAV_DEFS[id]);
-      Object.keys(NAV_DEFS).forEach(id => { if (!order.includes(id)) order.push(id); });
-      return { order, hidden: (c.hidden || []).filter(id => NAV_DEFS[id]) };
+      const hidden = (c.hidden || []).filter(id => NAV_DEFS[id]);
+      Object.keys(NAV_DEFS).forEach(id => { if (!order.includes(id)) { order.push(id); hidden.push(id); } }); // abas novas começam escondidas
+      return { order, hidden };
     }
   } catch (e) { /* usa o padrão */ }
   return JSON.parse(JSON.stringify(NAV_DEFAULT));
@@ -442,7 +446,7 @@ function navigateTo(screen, { refresh = true } = {}) {
     target.classList.add("active");
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
-  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
+  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   document.getElementById("topbar-title").textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
   if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas" && screen !== "categoria-detalhe");
@@ -1289,7 +1293,7 @@ function computeRelGeral() {
   const sobra = entradas - saidas;
   document.getElementById("rel-resultado").textContent = fmtBRL(Math.abs(sobra));
   document.getElementById("rel-res-label").textContent = sobra >= 0 ? "Sobrou" : "Faltou";
-  document.getElementById("rel-resultado").style.color = sobra >= 0 ? "var(--green)" : "var(--red)";
+  document.getElementById("rel-resultado").style.color = sobra >= 0 ? "var(--green)" : "var(--out)";
   document.getElementById("rel-frase").textContent = txs.length
     ? `Entrou ${fmtBRL(entradas)} e saiu ${fmtBRL(saidas)}. ${sobra >= 0 ? "Sobrou" : "Faltou"} ${fmtBRL(Math.abs(sobra))} no período.`
     : "Nenhuma transação neste período.";
@@ -1321,7 +1325,7 @@ function drawBarChart(canvasId, byMonth) {
   const groupW = (w - padding) / 12;
   const textSecondary = themeColor("--text-secondary") || "#6B7A90";
   const greenColor = themeColor("--green") || "#16A34A";
-  const redColor = themeColor("--red") || "#E5484D";
+  const redColor = themeColor("--out") || "#E5484D";
   ctx.font = "600 9px Inter, sans-serif";
   ctx.fillStyle = textSecondary;
   ctx.textAlign = "center";
