@@ -728,9 +728,9 @@ async function saveCategoria() {
   if (pendingCatTxId == null || !pendingCatSelected) return;
   const r = await api(`/transactions/${pendingCatTxId}/category`, { method: "PUT", body: { category: pendingCatSelected } });
   await refreshTransactions();
-  if (r && r.applied) alert(`Pronto! Também apliquei essa categoria em ${r.applied} transaç${r.applied === 1 ? "ão parecida" : "ões parecidas"}.`);
   closeAllModals();
   renderScreen(currentScreen);
+  if (r && r.applied) showToast(`Pronto! Também apliquei essa categoria em ${r.applied} transaç${r.applied === 1 ? "ão parecida" : "ões parecidas"}.`);
 }
 
 
@@ -1103,7 +1103,20 @@ function renderComparacao() {
 /* ============================================================
    MODALS
    ============================================================ */
-function openModal(id) { document.getElementById(id).classList.add("active"); }
+function openModal(id) { closeAllModals(); document.getElementById(id).classList.add("active"); }
+
+// Aviso não-bloqueante no rodapé da tela. Diferente de alert(), não trava a thread —
+// então a tela já mostra os dados atualizados por trás dele (ex: contas recém-sincronizadas).
+let toastTimer = null;
+function showToast(msg, { error = false, ms = 5000 } = {}) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  clearTimeout(toastTimer);
+  el.textContent = msg;
+  el.classList.toggle("toast-error", error);
+  el.classList.add("show");
+  toastTimer = setTimeout(() => el.classList.remove("show"), ms);
+}
 function closeAllModals() { document.querySelectorAll(".modal-overlay").forEach(m => m.classList.remove("active")); }
 
 /* ============================================================
@@ -1317,10 +1330,12 @@ async function startPluggyConnect() {
             await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
             renderScreen(currentScreen);
             if (!r.contasEncontradas) {
-              alert("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
+              showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
+            } else {
+              showToast(`Conectado! ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`);
             }
           } catch (e) {
-            alert("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message);
+            showToast("Conectado, mas houve um erro ao salvar/sincronizar: " + e.message, { error: true });
           } finally {
             hideScreenLoader();
           }
@@ -1342,15 +1357,15 @@ async function syncPluggyItem(itemId) {
     const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
     await Promise.all([refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
-    let msg = `Sincronizado! ${r.novas ?? 0} transações novas salvas.\n\n`;
-    if (r.item) msg += `Conexão: ${r.item.status || "?"}${r.item.executionStatus ? " / " + r.item.executionStatus : ""}\n`;
-    msg += `Contas encontradas: ${r.contasEncontradas}\n`;
-    (r.contas || []).forEach(c => { msg += `• ${c.nome || "Conta"} (${c.tipo || "?"}): ${c.transacoes} transações${c.erro ? " — erro " + c.erro : ""}\n`; });
-    if (r.item?.erro) msg += `\nErro do Pluggy: ${r.item.erro}`;
-    if (!r.contasEncontradas) msg += `\nO Pluggy não devolveu nenhuma conta para essa conexão.`;
-    alert(msg);
+    let msg = `Sincronizado! ${r.novas ?? 0} novas • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`;
+    if (!r.contasEncontradas) {
+      msg = r.item?.status === "UPDATING"
+        ? "O banco ainda está processando essa conexão. Espera um minuto e toca em Sincronizar de novo."
+        : `O Pluggy não devolveu nenhuma conta ainda.${r.item?.erro ? " Erro: " + r.item.erro : ""}`;
+    }
+    showToast(msg, { error: !r.contasEncontradas });
   } catch (e) {
-    alert("Erro ao sincronizar: " + e.message);
+    showToast("Erro ao sincronizar: " + e.message, { error: true });
   }
 }
 
