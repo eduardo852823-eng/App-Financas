@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS category_overrides (
   PRIMARY KEY (user_id, cat_id)
 );
 
+CREATE TABLE IF NOT EXISTS pluggy_hidden_accounts (
+  user_id INTEGER NOT NULL,
+  account_id TEXT NOT NULL,
+  item_id TEXT,
+  hidden_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, account_id)
+);
+
 CREATE TABLE IF NOT EXISTS pluggy_accounts (
   account_id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -874,12 +882,23 @@ const PLUGGY_CLIENT_ID = process.env.PLUGGY_CLIENT_ID;
 const PLUGGY_CLIENT_SECRET = process.env.PLUGGY_CLIENT_SECRET;
 const PLUGGY_BASE_URL = "https://api.pluggy.ai";
 
+// fetch com tempo limite: sem isso, se o Pluggy demorar/travar, a sincronização ficava pendurada
+// para sempre e as bolinhas do app giravam sem fim.
+function pfetch(url, opts = {}, ms = 20000) {
+  return fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
+}
+function withDeadline(promise, ms, message) {
+  let t;
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error(message), { timeout: true })), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
 let pluggyApiKeyCache = { key: null, expiresAt: 0 };
 async function getPluggyApiKey() {
   if (pluggyApiKeyCache.key && Date.now() < pluggyApiKeyCache.expiresAt) {
     return pluggyApiKeyCache.key;
   }
-  const resp = await fetch(`${PLUGGY_BASE_URL}/auth`, {
+  const resp = await pfetch(`${PLUGGY_BASE_URL}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: PLUGGY_CLIENT_ID, clientSecret: PLUGGY_CLIENT_SECRET }),
@@ -896,7 +915,7 @@ async function fetchAllPluggyTransactions(accountId, headers) {
   const list = [];
   let url = `${PLUGGY_BASE_URL}/v2/transactions?accountId=${accountId}`;
   for (let page = 0; page < 50 && url; page++) {
-    const resp = await fetch(url, { headers });
+    const resp = await pfetch(url, { headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     list.push(...(data.results || []));
@@ -909,7 +928,7 @@ async function fetchAllPluggyTransactions(accountId, headers) {
 // se der erro ou vier vazio, segue sem faturas em vez de quebrar a sincronização.
 async function fetchPluggyBills(accountId, headers) {
   try {
-    const resp = await fetch(`${PLUGGY_BASE_URL}/bills?accountId=${accountId}`, { headers });
+    const resp = await pfetch(`${PLUGGY_BASE_URL}/bills?accountId=${accountId}`, { headers });
     if (!resp.ok) return [];
     const data = await resp.json();
     return Array.isArray(data.results) ? data.results : [];
@@ -931,7 +950,7 @@ app.post("/api/pluggy/connect-token", auth, h(async (req, res) => {
   const { itemId } = req.body || {};
   const body = { clientUserId: String(req.userId) };
   if (itemId) body.itemId = itemId;
-  const resp = await fetch(`${PLUGGY_BASE_URL}/connect_token`, {
+  const resp = await pfetch(`${PLUGGY_BASE_URL}/connect_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-KEY": apiKey },
     body: JSON.stringify(body),
@@ -972,9 +991,23 @@ app.get("/api/pluggy/items", auth, h(async (req, res) => {
 
 // Contas (banco / cartão) de todas as conexões do usuário, com o saldo real informado pelo Pluggy.
 app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
-  const rows = await all("SELECT account_id, item_id, name, type, balance, updated_at, data, bills FROM pluggy_accounts WHERE user_id = ?", [req.userId]);
+  const rows = await all(`SELECT account_id, item_id, name, type, balance, updated_at, data, bills FROM pluggy_accounts
+    WHERE user_id = ? AND account_id NOT IN (SELECT account_id FROM pluggy_hidden_accounts WHERE user_id = ?)`, [req.userId, req.userId]);
   const parse = (txt) => { try { return txt ? JSON.parse(txt) : null; } catch (e) { return null; } };
   res.json(rows.map(r => ({ ...r, data: parse(r.data), bills: parse(r.bills) || [] })));
+}));
+
+// Exclui um cartão (ou conta) de vez: some do app com as transações dele e NÃO volta nas próximas
+// sincronizações (fica na lista de excluídos). Reconectar o banco do zero limpa essa lista.
+app.delete("/api/pluggy/accounts/:accountId", auth, h(async (req, res) => {
+  const acc = await get("SELECT account_id, item_id FROM pluggy_accounts WHERE account_id = ? AND user_id = ?", [req.params.accountId, req.userId]);
+  if (!acc) return res.status(404).json({ error: "Cartão não encontrado (talvez já tenha sido excluído)." });
+  await db.batch([
+    { sql: "INSERT OR REPLACE INTO pluggy_hidden_accounts (user_id, account_id, item_id) VALUES (?,?,?)", args: [req.userId, acc.account_id, acc.item_id] },
+    { sql: "DELETE FROM transactions WHERE user_id = ? AND account_id = ?", args: [req.userId, acc.account_id] },
+    { sql: "DELETE FROM pluggy_accounts WHERE account_id = ? AND user_id = ?", args: [acc.account_id, req.userId] },
+  ], "write");
+  res.json({ ok: true });
 }));
 
 // Investimentos + histórico diário (últimos 120 dias). Só devolve o que existe: banco sem investimento não aparece.
@@ -1000,7 +1033,7 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   if (!item) return res.status(404).json({ error: "Conexão não encontrada" });
   try {
     const apiKey = await getPluggyApiKey();
-    await fetch(`${PLUGGY_BASE_URL}/items/${item.item_id}`, {
+    await pfetch(`${PLUGGY_BASE_URL}/items/${item.item_id}`, {
       method: "DELETE",
       headers: { "X-API-KEY": apiKey },
     });
@@ -1008,7 +1041,8 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
     console.error("Erro ao deletar item no Pluggy (seguindo mesmo assim):", e.message);
   }
   await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, item.item_id]);
-  await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [item.item_id]);
+  await run("DELETE FROM pluggy_accounts WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
+  await run("DELETE FROM pluggy_hidden_accounts WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
   await run("DELETE FROM inv_positions WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
   await run("DELETE FROM inv_daily_history WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
   await run("DELETE FROM pluggy_items WHERE id = ?", [item.id]);
@@ -1017,9 +1051,12 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
 
 // Sincroniza um item do Pluggy: grava as contas (com saldo real) e as transações de cada conta.
 async function syncPluggyItemData(item, headers) {
-  const accResp = await fetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers });
+  const accResp = await pfetch(`${PLUGGY_BASE_URL}/accounts?itemId=${item.item_id}`, { headers });
   if (!accResp.ok) throw new Error(`Falha ao buscar contas no Pluggy (HTTP ${accResp.status})`);
-  const { results: accounts } = await accResp.json();
+  const { results: allAccounts = [] } = await accResp.json();
+  // cartões/contas que o usuário excluiu não voltam
+  const hidden = new Set((await all("SELECT account_id FROM pluggy_hidden_accounts WHERE user_id = ?", [item.user_id])).map(r => r.account_id));
+  const accounts = allAccounts.filter(a => !hidden.has(a.id));
 
   const ctx = await buildUserCtx(item.user_id);
   // transações antigas ainda "não identificadas" desta conexão: se agora dá para classificar, atualiza
@@ -1071,7 +1108,7 @@ async function syncPluggyItemData(item, headers) {
   // investimentos: substitui a lista do item e grava o saldo de hoje no histórico
   const invStatements = [];
   try {
-    const invResp = await fetch(`${PLUGGY_BASE_URL}/investments?itemId=${item.item_id}`, { headers });
+    const invResp = await pfetch(`${PLUGGY_BASE_URL}/investments?itemId=${item.item_id}`, { headers });
     if (invResp.ok) {
       const { results: invs = [] } = await invResp.json();
       invStatements.push({ sql: "DELETE FROM inv_positions WHERE user_id = ? AND item_id = ?", args: [item.user_id, item.item_id] });
@@ -1112,6 +1149,15 @@ async function syncPluggyItemData(item, headers) {
   if (allOk) {
     statements.push({ sql: "DELETE FROM transactions WHERE user_id = ? AND bank_id = ? AND external_id IS NULL", args: [item.user_id, item.item_id] });
   }
+  // conta que o banco não devolve mais (encerrada / trocada) sai do app; sem isso o saldo total somava conta velha.
+  // Só limpa quando o Pluggy devolveu pelo menos uma conta, para uma resposta vazia não apagar tudo.
+  if (allAccounts.length) {
+    const keep = allAccounts.map(a => a.id);
+    statements.push({
+      sql: `DELETE FROM pluggy_accounts WHERE user_id = ? AND item_id = ? AND account_id NOT IN (${keep.map(() => "?").join(",")})`,
+      args: [item.user_id, item.item_id, ...keep]
+    });
+  }
   statements.push(...invStatements);
   statements.push(...updStatements); // antes do offset, para não contar como "novas"
   const offset = statements.length;
@@ -1121,7 +1167,8 @@ async function syncPluggyItemData(item, headers) {
   const novas = results.slice(offset).reduce((sum, r) => sum + (r.rowsAffected || 0), 0);
   await run("UPDATE pluggy_items SET last_sync = datetime('now') WHERE id = ?", [item.id]);
   classifyPendingWithAI().catch(() => {}); // opcional; só age se GEMINI_API_KEY ou ANTHROPIC_API_KEY existir
-  return { accounts, contas, transacoesProcessadas, novas };
+  const erros = contas.filter(c => c.erro).map(c => `${c.nome || "Conta"}: ${c.erro}`);
+  return { accounts, contas, transacoesProcessadas, novas, erros };
 }
 
 // Sincroniza um item sob demanda (botão "Sincronizar").
@@ -1137,7 +1184,7 @@ async function waitPluggyItemReady(itemId, headers, { attempts = 5, delayMs = 25
   let itemInfo = null;
   for (let i = 0; i < attempts; i++) {
     try {
-      const r = await fetch(`${PLUGGY_BASE_URL}/items/${itemId}`, { headers });
+      const r = await pfetch(`${PLUGGY_BASE_URL}/items/${itemId}`, { headers });
       if (r.ok) itemInfo = await r.json();
     } catch (e) { /* segue tentando */ }
     if (itemInfo && itemInfo.status !== "UPDATING") break;
@@ -1153,6 +1200,7 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
   if (syncingItems.has(item.item_id)) return res.status(409).json({ error: "Este banco já está sincronizando. Aguarde alguns segundos." });
   syncingItems.add(item.item_id);
   try {
+  await withDeadline((async () => {
 
   const apiKey = await getPluggyApiKey();
   const headers = { "X-API-KEY": apiKey };
@@ -1170,11 +1218,14 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
       result = await syncPluggyItemData(item, headers);
     }
   } catch (e) {
-    return res.status(502).json({ error: e.message });
+    if (res.headersSent) return;
+    return res.status(502).json({ error: e.name === "TimeoutError" ? "O Pluggy demorou demais para responder. Tente de novo em instantes." : e.message });
   }
+  if (res.headersSent) return;
   res.json({
     ok: true,
     contasEncontradas: result.accounts.length,
+    erros: result.erros,
     transacoesProcessadas: result.transacoesProcessadas,
     novas: result.novas,
     contas: result.contas,
@@ -1185,6 +1236,9 @@ app.post("/api/pluggy/sync/:itemId", auth, h(async (req, res) => {
       erro: itemInfo.error?.message || null
     } : null
   });
+  })(), 100000, "A sincronização demorou demais. Tente de novo em instantes.");
+  } catch (e) {
+    if (!res.headersSent) res.status(e.timeout ? 504 : 500).json({ error: e.message });
   } finally { syncingItems.delete(item.item_id); }
 }));
 
@@ -1197,12 +1251,14 @@ async function syncAllPluggyItems() {
   try {
     const items = await all("SELECT * FROM pluggy_items");
     for (const item of items) {
+      if (syncingItems.has(item.item_id)) continue; // já tem alguém sincronizando esse banco agora
+      syncingItems.add(item.item_id);
       try {
         const apiKey = await getPluggyApiKey();
-        await syncPluggyItemData(item, { "X-API-KEY": apiKey });
+        await withDeadline(syncPluggyItemData(item, { "X-API-KEY": apiKey }), 100000, "tempo esgotado");
       } catch (e) {
         console.error(`[pluggy-sync] erro no item ${item.item_id}:`, e.message);
-      }
+      } finally { syncingItems.delete(item.item_id); }
     }
     console.log("[pluggy-sync] sincronização periódica concluída —", new Date().toISOString());
   } catch (e) {
