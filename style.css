@@ -436,7 +436,7 @@ a{text-decoration:none; color:inherit;}
 
 /* demo badge */
 .demo-badge{
-  display:inline-block; background:#FFF4DE; color:#B36B00; font-size:11.5px; font-weight:700;
+  display:inline-block; background:rgba(var(--accent-rgb),.12); color:var(--blue); font-size:11.5px; font-weight:700;
   padding:5px 10px; border-radius:20px; margin-bottom:14px;
 }
 
@@ -726,7 +726,7 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 [data-theme="dark"] .topbar{background:rgba(21,30,46,0.92);}
 [data-theme="dark"] .bottom-nav{background:var(--card-bg); box-shadow:0 -2px 14px rgba(0,0,0,0.5); border-top:1px solid rgba(255,255,255,0.06);}
 [data-theme="dark"] .modal-overlay{background:rgba(0,0,0,0.6);}
-[data-theme="dark"] .demo-badge{background:#3A2E12; color:#F5C56B;}
+[data-theme="dark"] .demo-badge{background:rgba(var(--accent-rgb),.18); color:var(--blue);}
 [data-theme="dark"] .btn-outline{background:var(--card-bg); color:var(--text-main); border-color:rgba(255,255,255,0.14);}
 [data-theme="dark"] .add-bank-chip{border-color:rgba(255,255,255,0.18);}
 [data-theme="dark"] .inv-row{border-top-color:rgba(255,255,255,0.08);}
@@ -816,3 +816,93 @@ body{overscroll-behavior-y:none;}
 .credit-card-top{text-align:center;}
 .limit-highlight-row{justify-content:center; text-align:center;}
 .limit-highlight{text-align:center; flex:1;}
+
+
+/* ============================================================
+   PADRONIZAÇÃO VISUAL — todas as telas seguem o visual da Início
+   (mesmas superfícies, bordas, raios, sombras, campos e cores)
+   ============================================================ */
+:root{
+  --surface-border:1px solid rgba(15,42,68,0.07);
+  --surface-radius:16px;
+}
+[data-theme="dark"]{ --surface-border:1px solid rgba(255,255,255,0.07); }
+
+/* superfícies: mesmo cartão em qualquer tela */
+.card, .tx-row, .bank-row, .cat-row, .bank-chip, .inst-conn, .inv-bank,
+.credit-card-item, .search-box, .review-banner, .catdet-head{
+  background:var(--card-bg);
+  border:var(--surface-border);
+  border-radius:var(--surface-radius);
+  box-shadow:var(--shadow);
+}
+.review-banner{border-style:solid;}
+.card-balance{border:none; border-radius:20px;}
+.card-mini{border-radius:var(--surface-radius);}
+.tx-row, .cat-row, .bank-row{padding:14px 16px;}
+.inst-conn{padding:16px;}
+.inst-acc{background:var(--bg-soft); border:var(--surface-border); box-shadow:none; border-radius:12px;}
+.credit-card-item{overflow:hidden;}
+
+/* cartões de resumo (entrou/saiu/sobrou) iguais aos da Início em Relatórios */
+.card-green, .card-red{border-left-width:4px;}
+.card-result{border-left:4px solid var(--blue);}
+.card-result .mini-label{color:var(--text-secondary);}
+
+/* campos e seletores iguais em todas as telas */
+.filters-row select, .filters-grid select, #comp-mes1, #comp-mes2, #comp-tipo,
+.modal-body input, .modal-body select{
+  background:var(--card-bg); color:var(--text-main);
+  border:1.5px solid var(--gray-300); border-radius:12px;
+  padding:12px 14px; font-weight:500;
+}
+.filters-row select:focus, .filters-grid select:focus, #comp-mes1:focus, #comp-mes2:focus, #comp-tipo:focus,
+.modal-body input:focus, .modal-body select:focus, .search-box:focus-within{
+  outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(var(--accent-rgb),.15);
+}
+.search-box{padding:12px 14px;}
+.search-box input{border:none; box-shadow:none; padding:0; background:transparent;}
+.btn-filter-toggle{border:var(--surface-border); border-radius:14px; width:44px; height:44px;}
+
+/* títulos de seção e textos de apoio iguais aos da Início */
+.section-head h3, .inv-bank-head h3, .inst-conn-title{color:var(--navy); font-weight:700;}
+.tx-month-label{color:var(--text-secondary); font-weight:700; letter-spacing:.2px;}
+.screen-hint{color:var(--text-secondary);}
+
+/* abas segmentadas */
+.segmented{border-radius:14px; border:var(--surface-border);}
+.seg-btn.active{color:var(--blue); box-shadow:var(--shadow);}
+
+/* barra de baixo e topo com a mesma borda sutil */
+.topbar{box-shadow:none; border-bottom:var(--surface-border);}
+.bottom-nav{border-top:var(--surface-border); box-shadow:0 -6px 20px rgba(15,30,56,.06);}
+[data-theme="dark"] .bottom-nav{box-shadow:0 -6px 20px rgba(0,0,0,.45);}
+
+/* botões: mesmo formato em todas as telas */
+.btn{border-radius:14px;}
+.btn-connect{border-radius:999px;}
+.btn-outline{border:1.5px solid var(--gray-300);}
+.card-tx-btn{border-radius:12px;}
+
+/* valores positivos/negativos sempre com as mesmas cores do tema */
+.tx-value.pos, .es-bank-total.pos, .detalhe-value.pos, .rev-value.pos, .comp-diff.down{color:var(--green);}
+.tx-value.neg, .es-bank-total.neg, .detalhe-value.neg, .rev-value.neg, .comp-diff.up{color:var(--out);}
+
+/* ícones (tx, categoria, banco) com o mesmo raio */
+.tx-icon, .cat-icon, .bank-avatar{border-radius:12px;}
+
+/* linhas internas dos cards de Relatórios/Investimentos */
+.bank-line-row, .inv-row, .kv-row{border-color:var(--gray-100);}
+[data-theme="dark"] .bank-line-row, [data-theme="dark"] .kv-row{border-color:rgba(255,255,255,.08);}
+
+/* tela de créditos */
+.credits-card{border:var(--surface-border);}
+.howto{border:var(--surface-border);}
+
+/* hover só onde há mouse, para não "grudar" no celular */
+@media (hover:none){
+  .card:hover, .tx-row:hover, .bank-row:hover, .cat-row:hover, .bank-chip:hover{transform:none; box-shadow:var(--shadow);}
+}
+
+/* seleção de categoria segue a cor do tema (antes era azul fixo) */
+.cat-grid-item.selected{background:rgba(var(--accent-rgb),.10);}

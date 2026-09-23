@@ -97,33 +97,35 @@
 
       <!-- ---------- DASHBOARD ---------- -->
       <section class="screen screen-dashboard active" data-screen="inicio">
-        <p class="greeting" id="greeting-text">Olá!</p>
-        <p class="subtext">Aqui está um resumo das suas finanças.</p>
-
-        <div class="card card-balance">
-          <div class="card-balance-top">
-            <span class="card-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Saldo total</span>
+        <section class="hero" aria-label="Saldo total">
+          <div class="hero-top">
+            <div class="hero-hello">
+              <p class="greeting" id="greeting-text">Olá!</p>
+              <p class="hero-sub" id="balance-change">—</p>
+            </div>
             <button class="eye-btn" id="btn-hide-values" type="button" title="Esconder valores" aria-label="Esconder valores">
               <svg id="eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg id="eye-closed" class="hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18M10.6 5.1A10 10 0 0112 5c6.4 0 10 7 10 7a17 17 0 01-3.2 4M6.6 6.6A17 17 0 002 12s3.6 7 10 7a10 10 0 004.4-1"/></svg>
             </button>
           </div>
-          <div class="card-balance-value" id="balance-total">R$ 0,00</div>
-          <div class="card-balance-sub" id="balance-change">—</div>
-        </div>
+          <div class="hero-label">Saldo total</div>
+          <div class="hero-value" id="balance-total"><span class="cur">R$</span>0<span class="cents">,00</span></div>
+          <svg class="hero-flow" id="hero-flow" viewBox="0 0 320 70" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </section>
 
-        <div class="row-cards">
-          <div class="card card-mini card-green card-clickable" id="btn-ver-entradas">
-            <span class="mini-label">↑ Entradas</span>
-            <span class="mini-value" id="total-entradas">R$ 0,00</span>
+        <div class="flow-tiles">
+          <div class="flow-tile in card-clickable" id="btn-ver-entradas" role="button" tabindex="0">
+            <span class="flow-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+            <span class="flow-txt"><span class="mini-label">Entradas</span><span class="mini-value" id="total-entradas">R$ 0,00</span></span>
           </div>
-          <div class="card card-mini card-red card-clickable" id="btn-ver-saidas">
-            <span class="mini-label">↓ Saídas</span>
-            <span class="mini-value" id="total-saidas">R$ 0,00</span>
+          <div class="flow-tile out card-clickable" id="btn-ver-saidas" role="button" tabindex="0">
+            <span class="flow-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7L7 17M16 17H7V8"/></svg></span>
+            <span class="flow-txt"><span class="mini-label">Saídas</span><span class="mini-value" id="total-saidas">R$ 0,00</span></span>
           </div>
         </div>
+        <div class="flow-bar" aria-hidden="true"><span id="flow-in"></span><span id="flow-out"></span></div>
+        <p class="screen-hint flow-hint">A barra mostra quanto do movimento foi entrada e quanto foi saída. Toque em um dos dois para ver a lista.</p>
 
-        <p class="screen-hint">Saldo = soma das suas contas. Toque em Entradas ou Saídas para ver a lista.</p>
         <div class="filters-row">
           <select id="filter-periodo"></select>
           <select id="filter-banco"></select>
@@ -385,6 +387,24 @@
     </div>
   </div>
 
+  <!-- ===================== EXCLUIR CARTÃO (modal) ===================== -->
+  <div class="modal-overlay" id="modal-excluir-cartao">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Excluir cartão?</h3>
+        <button class="icon-btn" data-close-modal aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-card-name" id="del-card-name"></p>
+        <p class="del-card-text">O cartão some do app junto com as compras dele e não volta nas próximas sincronizações. Seu banco não é afetado.</p>
+        <div class="del-card-actions">
+          <button class="btn btn-outline" type="button" data-close-modal>Cancelar</button>
+          <button class="btn btn-danger" type="button" id="btn-confirmar-excluir-cartao">Excluir cartão</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== PLUGGY: PEDIR CPF (modal) ===================== -->
   <div class="modal-overlay" id="modal-pluggy-cpf">
     <div class="modal-card">
@@ -497,7 +517,7 @@
     </div>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 </div>
 
