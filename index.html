@@ -97,7 +97,7 @@
       <!-- ---------- DASHBOARD ---------- -->
       <section class="screen screen-dashboard active" data-screen="inicio">
         <p class="greeting" id="greeting-text">Olá!</p>
-        <p class="subtext">Aqui está um resumo das suas finanças. O <b>saldo total</b> é a soma do dinheiro que está nas suas contas agora.</p>
+        <p class="subtext">Aqui está um resumo das suas finanças.</p>
 
         <div class="card card-balance">
           <div class="card-balance-top">
@@ -122,7 +122,7 @@
           </div>
         </div>
 
-        <p class="screen-hint">Toque em <b>Entradas</b> ou <b>Saídas</b> para ver a lista. Use o olho no card de saldo para esconder os valores.</p>
+        <p class="screen-hint">Saldo = soma das suas contas. Toque em Entradas ou Saídas para ver a lista.</p>
         <div class="filters-row">
           <select id="filter-periodo"></select>
           <select id="filter-banco"></select>
@@ -161,7 +161,7 @@
 
       <!-- ---------- TRANSAÇÕES ---------- -->
       <section class="screen screen-transacoes" data-screen="transacoes">
-        <p class="screen-hint">Todas as movimentações das suas contas. Toque em uma para ver os detalhes ou trocar a categoria.</p>
+        <p class="screen-hint">Toque numa transação para ver detalhes ou trocar a categoria.</p>
         <div class="search-row">
           <div class="search-box">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -177,7 +177,7 @@
 
       <!-- ---------- CATEGORIAS ---------- -->
       <section class="screen screen-categorias" data-screen="categorias">
-        <p class="screen-hint">Mostra para onde vai o seu dinheiro. Toque numa categoria (na lista ou na legenda) para ver só as transações dela.</p>
+        <p class="screen-hint">Toque numa categoria para ver só as transações dela.</p>
         <div class="section-head">
           <h3>Categorias</h3>
           <a href="#" class="link-small" id="btn-nova-categoria">+ Nova categoria</a>
@@ -228,13 +228,13 @@
           <div class="card-balance-value" id="inv-total">R$ 0,00</div>
           <div class="card-balance-sub" id="inv-change">—</div>
         </div>
-        <p class="screen-hint">Dinheiro aplicado nos bancos conectados. <b>Rendeu</b> = valor de hoje menos o que você aplicou.</p>
+        <p class="screen-hint">Rendeu = valor de hoje menos o que você aplicou.</p>
         <div id="inv-list"></div>
       </section>
 
       <!-- ---------- RELATÓRIOS ---------- -->
       <section class="screen screen-relatorios" data-screen="relatorios">
-        <p class="screen-hint">Escolha um mês para ver quanto entrou, quanto saiu e quanto sobrou. Em "Comparar meses" você vê a diferença entre dois meses.</p>
+        <p class="screen-hint">Escolha um mês para ver quanto entrou, saiu e sobrou.</p>
         <div class="segmented" id="rel-segmented">
           <button class="seg-btn active" data-seg="geral">Resumo</button>
           <button class="seg-btn" data-seg="comparar">Comparar meses</button>
@@ -478,7 +478,7 @@
             Créditos
           </button>
           <div class="profile-menu-sep"></div>
-          <button class="profile-menu-item" id="btn-configuracoes" data-close-modal>
+          <button class="profile-menu-item" id="btn-configuracoes">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             Configurações
           </button>

@@ -778,3 +778,24 @@ html,body{max-width:100%; overflow-x:hidden;}
 .credit-line span{color:var(--text-secondary);} .credit-line strong{text-align:right;}
 .howto{padding:16px 18px 16px 8px;} .howto ol{margin:0; padding-left:26px; display:flex; flex-direction:column; gap:10px; font-size:13.5px; line-height:1.5; color:var(--text-secondary);}
 .howto b{color:var(--text-main);}
+
+/* textos explicativos menores */
+.screen-hint{font-size:11.5px; line-height:1.45; margin:0 2px 10px; opacity:.9;}
+.rel-frase{font-size:12.5px; margin:8px 2px 12px;}
+.howto ol{font-size:12.5px; gap:8px;}
+.credit-line{font-size:12.5px;}
+.cfg-hint{font-size:10.5px;}
+.install-hint{font-size:11.5px;}
+
+/* mais correções visuais */
+html{-webkit-text-size-adjust:100%; -webkit-tap-highlight-color:transparent;}
+body{overscroll-behavior-y:none;}
+@media (max-width:520px){ input, select, textarea{font-size:16px !important;} }
+.inv-bank-head{flex-wrap:wrap;}
+.inv-bank-title{min-width:0; flex:1;}
+.credit-line strong{overflow-wrap:anywhere;}
+.filters-row select, .filters-grid select{min-width:0; text-overflow:ellipsis;}
+.section-head h3{overflow-wrap:anywhere;}
+.card{overflow-wrap:anywhere;}
+.banks-scroll{-webkit-overflow-scrolling:touch; scrollbar-width:none;}
+.banks-scroll::-webkit-scrollbar{display:none;}

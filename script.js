@@ -1355,6 +1355,7 @@ function renderComparacao() {
   const el = document.getElementById("comp-resultado");
   el.classList.remove("hidden");
   const verbo = tipo === "saida" ? "gastou" : "recebeu";
+  if (m1 === m2) { el.innerHTML = `<div class="empty-state">Escolha dois meses diferentes para comparar.</div>`; return; }
   el.innerHTML = v1 === 0 && v2 === 0
     ? `<div class="empty-state">Sem dados nesses dois meses.</div>`
     : `<div class="comp-diff ${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "↑" : "↓"} ${fmtBRL(Math.abs(diff))} ${diff >= 0 ? "a mais" : "a menos"}</div>
