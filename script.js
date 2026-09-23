@@ -27,7 +27,11 @@ const CATEGORIES = [
   { id: "nao_identificada", name: "Não identificada", color: "#CBD5E1", icon: "❓" }
 ];
 function catInfo(id) { return allCategories().find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1]; }
+// Botão de olho do Início: esconde valores (e a lista de entradas/saídas) só nas telas do Início
+let hideValues = localStorage.getItem("hideValues") === "1";
+function valuesHidden() { return hideValues && (currentScreen === "inicio" || currentScreen === "entradas-saidas"); }
 function fmtBRL(v) {
+  if (valuesHidden()) return "R$ ••••";
   const sign = v < 0 ? "-" : "";
   return sign + "R$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -122,7 +126,6 @@ const state = {
   transactions: [],
   pluggyItems: [],
   accounts: [],
-  investments: [],
   customCategories: [],
   categoryOverrides: {}
 };
@@ -144,8 +147,8 @@ async function refreshAccounts() {
   catch (e) { state.accounts = []; }
 }
 async function refreshInvestments() {
-  try { state.investments = await api("/pluggy/investments"); }
-  catch (e) { state.investments = []; }
+  try { const r = await api("/investments"); state.investments = r.investments || []; state.investHistory = r.history || []; }
+  catch (e) { state.investments = []; state.investHistory = []; }
 }
 async function refreshPluggyItems() {
   try { state.pluggyItems = await api("/pluggy/items"); }
@@ -162,7 +165,7 @@ async function refreshCategories() {
   }
 }
 async function refreshAll() {
-  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts(), refreshInvestments(), refreshCategories()]);
+  await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts(), refreshCategories(), refreshInvestments()]);
 }
 // Todas as categorias disponíveis (fixas + criadas pelo usuário), sempre com
 // "Não identificada" por último.
@@ -311,7 +314,7 @@ function navigateTo(screen, { refresh = true } = {}) {
   const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   document.getElementById("topbar-title").textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
-  if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas" && screen !== "bancos");
+  if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas");
   renderScreen(screen);
   document.getElementById("content").scrollTop = 0;
   loadScreenData(screen, refresh);
@@ -444,7 +447,18 @@ function renderDashboard() {
   renderCards();
 }
 
+function applyHideUI() {
+  document.getElementById("eye-open")?.classList.toggle("hidden", hideValues);
+  document.getElementById("eye-closed")?.classList.toggle("hidden", !hideValues);
+}
+function toggleHideValues() {
+  hideValues = !hideValues;
+  localStorage.setItem("hideValues", hideValues ? "1" : "0");
+  applyHideUI();
+  renderDashboard();
+}
 function openEntradasSaidas(tipo) {
+  if (valuesHidden()) { showToast("Valores escondidos. Toque no olho para mostrar."); return; }
   esTipo = tipo;
   navigateTo("entradas-saidas", { refresh: false });
 }
@@ -541,7 +555,7 @@ function renderCards() {
 function themeColor(varName) {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
 }
-function drawDonut(canvasId, byCat, total) {
+function drawDonut(canvasId, byCat, total, label = "gastos") {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
@@ -584,13 +598,13 @@ function drawDonut(canvasId, byCat, total) {
   ctx.fillText(fmtBRL(total), cx, cy+2);
   ctx.font = "600 11px Inter, sans-serif";
   ctx.fillStyle = textSecondary;
-  ctx.fillText("gastos", cx, cy+18);
+  ctx.fillText(label, cx, cy+18);
 }
 
 function renderLegend(elId, byCat, total) {
   const el = document.getElementById(elId);
   const entries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  if (!entries.length) { el.innerHTML = `<div class="empty-state">Nenhum gasto no período.</div>`; return; }
+  if (!entries.length) { el.innerHTML = `<div class="empty-state">Nenhuma transação no período.</div>`; return; }
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
@@ -602,93 +616,63 @@ function renderLegend(elId, byCat, total) {
 }
 
 /* ============================================================
+   INVESTIMENTOS
+   ============================================================ */
+function itemTitle(itemId) {
+  const accs = (state.accounts || []).filter(a => a.item_id === itemId && a.type !== "CREDIT");
+  const p = (state.pluggyItems || []).find(x => x.item_id === itemId);
+  return accs.length ? accs.map(a => prettyName(a.name)).join(" • ") : (p?.institution_name || "Banco");
+}
+// Saldo de um investimento ~30 dias atrás (snapshot mais próximo, sem passar de 30 dias). null = ainda sem histórico.
+function invBalanceAgo(invId, days = 30) {
+  const target = ymdLocal(new Date(Date.now() - days * 86400000));
+  const rows = (state.investHistory || []).filter(r => r.inv_id === invId);
+  const before = rows.filter(r => r.day <= target).pop();
+  if (before) return { balance: before.balance, day: before.day };
+  return null;
+}
+function deltaHtml(now, ago) {
+  if (!ago) return `<span class="inv-muted">Histórico começa hoje; a comparação aparece após 1 mês</span>`;
+  const d = now - ago.balance, cls = d >= 0 ? "pos" : "neg";
+  return `<span class="inv-delta ${cls}">${d >= 0 ? "▲ +" : "▼ "}${fmtBRL(d)}</span> <span class="inv-muted">vs ${fmtDate(ago.day)} (${fmtBRL(ago.balance)})</span>`;
+}
+function renderInvestimentos() {
+  const invs = (state.investments || []).filter(v => v.balance > 0 || v.balance < 0);
+  const list = document.getElementById("inv-list");
+  const total = invs.reduce((s, v) => s + (v.balance || 0), 0);
+  document.getElementById("inv-total").textContent = fmtBRL(total);
+  if (!invs.length) {
+    document.getElementById("inv-change").textContent = "Nenhum investimento encontrado";
+    list.innerHTML = `<div class="empty-state">Nenhum banco conectado tem investimentos. Se você investe e não aparece, toque em Sincronizar em "Meus bancos".</div>`;
+    return;
+  }
+  const agoTotals = invs.map(v => invBalanceAgo(v.inv_id));
+  const allAgo = agoTotals.every(Boolean);
+  const agoSum = allAgo ? agoTotals.reduce((s, a) => s + a.balance, 0) : null;
+  document.getElementById("inv-change").innerHTML = deltaHtml(total, allAgo ? { balance: agoSum, day: agoTotals[0].day } : null);
+  const byItem = {};
+  invs.forEach(v => (byItem[v.item_id] = byItem[v.item_id] || []).push(v));
+  list.innerHTML = Object.entries(byItem).map(([itemId, arr]) => {
+    const sub = arr.reduce((s, v) => s + v.balance, 0);
+    const rows = arr.map(v => {
+      const ago = invBalanceAgo(v.inv_id);
+      const aplic = v.amount_original != null ? `Aplicado ${fmtBRL(v.amount_original)}${v.applied_date ? " em " + fmtDate(v.applied_date) : ""}` : (v.applied_date ? "Aplicado em " + fmtDate(v.applied_date) : "");
+      const lucro = v.profit != null ? ` · Rendimento ${fmtBRL(v.profit)}` : "";
+      return `<div class="inv-row">
+        <div class="inv-row-top"><div class="inv-name">${esc(v.name)}</div><div class="inv-bal">${fmtBRL(v.balance)}</div></div>
+        ${aplic || lucro ? `<div class="inv-muted">${aplic}${lucro}</div>` : ""}
+        <div class="inv-ago">${deltaHtml(v.balance, ago)}</div>
+      </div>`;
+    }).join("");
+    return `<div class="card inv-bank"><div class="inv-bank-head"><h3>${esc(itemTitle(itemId))}</h3><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
+  }).join("");
+}
+
+/* ============================================================
    BANCOS
    ============================================================ */
 function renderBancos() {
   renderPluggyItems();
-}
-
-/* ============================================================
-   INVESTIMENTOS (dados do Pluggy: valor atual + taxa mensal)
-   ============================================================ */
-const INVEST_TYPE_LABELS = { FIXED_INCOME: "Renda fixa", MUTUAL_FUND: "Fundo", EQUITY: "Ação", ETF: "ETF", COE: "COE", SECURITY: "Título", OTHER: "Outro" };
-function fmtPct(v) { return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%"; }
-function investRateLabel(rate, estimated) {
-  if (typeof rate !== "number" || !isFinite(rate)) return "—";
-  return `${estimated ? "~" : ""}${fmtPct(rate)} ao mês`;
-}
-// Média ponderada pelo valor investido (só entram os que têm taxa)
-function weightedRate(list) {
-  const withRate = list.filter(i => typeof i.monthly_rate === "number" && typeof i.balance === "number" && i.balance > 0);
-  const base = withRate.reduce((s,i) => s + i.balance, 0);
-  if (!base) return { rate: null, estimated: false };
-  return {
-    rate: withRate.reduce((s,i) => s + i.balance * i.monthly_rate, 0) / base,
-    estimated: withRate.some(i => i.rate_source === "estimated")
-  };
-}
-function renderInvestimentos() {
-  const el = document.getElementById("invest-container");
-  if (!el) return;
-  const list = state.investments || [];
-  if (!list.length) {
-    el.innerHTML = `<div class="card invest-empty">
-      <div class="invest-empty-icon">📈</div>
-      <div class="invest-empty-title">Nenhum investimento encontrado</div>
-      <p class="subtext">Se você tem investimentos nas instituições conectadas, toque em <strong>Sincronizar</strong> para buscar. Nem toda instituição libera essa informação.</p>
-      <button class="btn btn-primary" data-nav="bancos">Conectar / gerenciar bancos</button>
-    </div>`;
-    return;
-  }
-  const groups = {};
-  list.forEach(i => {
-    const name = i.institution || i.connection_name || "Investimentos";
-    (groups[name] = groups[name] || []).push(i);
-  });
-  const sum = (arr) => arr.reduce((s,i) => s + (typeof i.balance === "number" ? i.balance : 0), 0);
-  const names = Object.keys(groups).sort((a,b) => sum(groups[b]) - sum(groups[a]));
-  const totalAll = sum(list);
-  const avg = weightedRate(list);
-
-  const summary = `<div class="card card-balance invest-summary">
-    <div class="card-balance-top"><span class="card-label">Total investido</span></div>
-    <div class="card-balance-value">${fmtBRL(totalAll)}</div>
-    <div class="card-balance-sub">${avg.rate !== null ? `Taxa média: ${investRateLabel(avg.rate, avg.estimated)}` : "Taxa mensal não informada"}</div>
-  </div>`;
-
-  const cards = names.map(name => {
-    const items = groups[name].slice().sort((a,b) => (b.balance || 0) - (a.balance || 0));
-    const g = weightedRate(items);
-    const rows = items.map(i => {
-      const estimated = i.rate_source === "estimated";
-      const type = INVEST_TYPE_LABELS[i.type] || prettyName(i.type || "");
-      return `<div class="invest-row">
-        <div class="invest-row-info">
-          <div class="invest-row-name">${esc(i.name || "Investimento")}</div>
-          <div class="invest-row-sub">${esc(type)}${i.due_date ? ` • vence ${esc(fmtDate(i.due_date) || i.due_date)}` : ""}</div>
-        </div>
-        <div class="invest-row-values">
-          <div class="invest-row-amount">${typeof i.balance === "number" ? fmtBRL(i.balance) : "—"}</div>
-          <div class="invest-row-rate">${investRateLabel(i.monthly_rate, estimated)}</div>
-        </div>
-      </div>`;
-    }).join("");
-    return `<div class="card invest-group">
-      <div class="invest-group-head">
-        <div class="bank-avatar" style="background:${pluggyColorFor(name)}">${initials(name)}</div>
-        <div class="invest-group-info">
-          <div class="invest-group-name">${esc(name)}</div>
-          <div class="invest-group-rate">${g.rate !== null ? `Taxa média: ${investRateLabel(g.rate, g.estimated)}` : "Taxa mensal não informada"}</div>
-        </div>
-        <div class="invest-group-total">${fmtBRL(sum(items))}</div>
-      </div>
-      ${rows}
-    </div>`;
-  }).join("");
-
-  const note = list.some(i => i.rate_source === "estimated")
-    ? `<p class="invest-note">~ Taxa estimada a partir da rentabilidade anual, pois a instituição não informou a do último mês.</p>` : "";
-  el.innerHTML = summary + cards + note;
 }
 
 /* ============================================================
@@ -973,13 +957,7 @@ async function checkReviewPrompt() {
 /* ============================================================
    CATEGORIAS
    ============================================================ */
-let catModalCat = null;
-let catModalShown = 0;
-const CAT_MODAL_PAGE = 30;
-const DONUT_MAX_SLICES = 6;
-
-// Transações do segmento atual (Gastos/Ganhos) somadas por categoria, da maior para a menor
-function catSegmentData() {
+function renderCategorias() {
   const txs = state.transactions.filter(t => catSegment === "gastos" ? t.type === "saida" : t.type === "entrada");
   const total = txs.reduce((s,t) => s + Math.abs(t.value), 0);
   const byCat = {};
@@ -988,44 +966,8 @@ function catSegmentData() {
     byCat[c] = (byCat[c] || 0) + Math.abs(t.value);
   });
   const entries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  return { txs, total, entries };
-}
-
-// Donut em SVG: as maiores categorias em fatias clicáveis; o resto agrupado em "Outras"
-function renderCatDonut(entries, total) {
-  const card = document.getElementById("cat-donut-card");
-  if (!card) return;
-  if (!entries.length || !total) { card.classList.add("hidden"); card.innerHTML = ""; return; }
-  card.classList.remove("hidden");
-
-  const top = entries.slice(0, DONUT_MAX_SLICES).map(([cat, val]) => ({ cat, val, color: catInfo(cat).color }));
-  const restVal = entries.slice(DONUT_MAX_SLICES).reduce((s, [, v]) => s + v, 0);
-  const slices = restVal > 0 ? [...top, { cat: null, val: restVal, color: "#9CA3AF" }] : top;
-
-  const R = 70, C = 2 * Math.PI * R;
-  let offset = 0;
-  const circles = slices.map(sl => {
-    const len = (sl.val / total) * C;
-    const gap = slices.length > 1 ? Math.min(2.5, len * 0.4) : 0;
-    const dash = Math.max(len - gap, 0.5);
-    const el = `<circle class="donut-slice${sl.cat ? " clickable" : ""}" ${sl.cat ? `data-cat="${esc(sl.cat)}"` : ""} cx="100" cy="100" r="${R}" fill="none" stroke="${sl.color}" stroke-width="28" stroke-dasharray="${dash.toFixed(2)} ${(C - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 100 100)"/>`;
-    offset += len;
-    return el;
-  }).join("");
-
-  const label = catSegment === "gastos" ? "em gastos" : "em ganhos";
-  card.innerHTML = `
-    <svg class="cat-donut" viewBox="0 0 200 200" role="img" aria-label="Gráfico de ${catSegment} por categoria">
-      ${circles}
-      <text x="100" y="98" text-anchor="middle" class="donut-center-val">${fmtBRL(total)}</text>
-      <text x="100" y="116" text-anchor="middle" class="donut-center-sub">${label}</text>
-    </svg>
-    <div class="donut-hint">Toque numa fatia ou categoria para ver as transações</div>`;
-}
-
-function renderCategorias() {
-  const { total, entries } = catSegmentData();
-  renderCatDonut(entries, total);
+  drawDonut("cat-donut", byCat, total, catSegment === "gastos" ? "em gastos" : "em ganhos");
+  renderLegend("cat-legend", byCat, total);
   const el = document.getElementById("categorias-list");
   if (!entries.length) {
     el.innerHTML = `<div class="empty-state">Nenhuma transação nesta categoria.</div>`;
@@ -1034,45 +976,17 @@ function renderCategorias() {
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="cat-row cat-row-clickable" data-cat="${esc(cat)}">
+    return `<div class="cat-row">
       <div class="cat-row-left">
         <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
         <div>
-          <div class="cat-name">${esc(info.name)}</div>
+          <div class="cat-name">${info.name}</div>
           <div class="cat-pct">${pct}%</div>
         </div>
       </div>
       <div class="cat-amount">${fmtBRL(val)}</div>
     </div>`;
   }).join("");
-}
-
-// Modal com as transações de uma categoria (dentro do segmento Gastos/Ganhos atual)
-function openCatTxModal(cat) {
-  catModalCat = cat;
-  catModalShown = CAT_MODAL_PAGE;
-  renderCatTxModal();
-  openModal("modal-cat-tx");
-}
-function renderCatTxModal() {
-  const cat = catModalCat;
-  const info = catInfo(cat);
-  const txs = state.transactions
-    .filter(t => (catSegment === "gastos" ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === cat)
-    .sort((a,b) => b.date.localeCompare(a.date));
-  const total = txs.reduce((s,t) => s + Math.abs(t.value), 0);
-  document.getElementById("cat-tx-title").innerHTML = `${info.icon} ${esc(info.name)}`;
-  const body = document.getElementById("cat-tx-body");
-  if (!txs.length) { body.innerHTML = `<div class="empty-state">Nenhuma transação nesta categoria.</div>`; return; }
-  const shown = txs.slice(0, catModalShown);
-  body.innerHTML = `
-    <div class="cat-tx-summary">
-      <div><div class="cat-tx-summary-label">${catSegment === "gastos" ? "Total gasto" : "Total recebido"}</div>
-      <div class="cat-tx-summary-value ${catSegment === "gastos" ? "neg" : "pos"}">${fmtBRL(total)}</div></div>
-      <div class="cat-tx-summary-count">${txs.length} transaç${txs.length === 1 ? "ão" : "ões"}</div>
-    </div>
-    ${shown.map(t => txRowHtml(t)).join("")}
-    ${txs.length > shown.length ? `<button class="btn btn-outline" id="btn-cat-tx-more">Mostrar mais</button>` : ""}`;
 }
 
 function openNovaCategoriaModal(editId) {
@@ -1488,10 +1402,10 @@ async function startPluggyConnect() {
               try { r = await api(`/pluggy/sync/${itemData.item.id}`, { method: "POST" }); }
               catch (e) { break; }
             }
-            await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts(), refreshInvestments()]);
+            await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
             renderScreen(currentScreen);
             if (!r.contasEncontradas) {
-              showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Conectar / gerenciar bancos daqui a um minuto se elas não aparecerem sozinhas.");
+              showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
             } else {
               showToast(`Conectado! ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`);
             }
@@ -1516,7 +1430,7 @@ async function startPluggyConnect() {
 async function syncPluggyItem(itemId) {
   try {
     const r = await api(`/pluggy/sync/${itemId}`, { method: "POST" });
-    await Promise.all([refreshTransactions(), refreshAccounts(), refreshInvestments()]);
+    await Promise.all([refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
     let msg = `Sincronizado! ${r.novas ?? 0} novas • ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`;
     if (!r.contasEncontradas) {
@@ -1534,7 +1448,7 @@ async function removePluggyItem(id) {
   if (!confirm("Remover esta conexão? As transações dela também serão apagadas do app.")) return;
   try {
     await api(`/pluggy/items/${id}`, { method: "DELETE" });
-    await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts(), refreshInvestments()]);
+    await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
   } catch (e) {
     alert("Erro ao remover: " + e.message);
@@ -1613,6 +1527,8 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("filter-periodo").addEventListener("change", (e) => { dashFilterPeriodo = e.target.value; renderDashboard(); });
     document.getElementById("filter-banco").addEventListener("change", (e) => { dashFilterBanco = e.target.value; renderDashboard(); });
+    document.getElementById("btn-hide-values").addEventListener("click", toggleHideValues);
+    applyHideUI();
     document.getElementById("btn-ver-entradas").addEventListener("click", () => openEntradasSaidas("entrada"));
     document.getElementById("btn-ver-saidas").addEventListener("click", () => openEntradasSaidas("saida"));
   }, "filtros do dashboard");
@@ -1708,17 +1624,6 @@ document.addEventListener("DOMContentLoaded", () => {
       catSegment = btn.dataset.seg;
       document.querySelectorAll("#cat-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
       renderCategorias();
-    });
-    const openFrom = (e) => {
-      const target = e.target.closest("[data-cat]");
-      if (target) openCatTxModal(target.dataset.cat);
-    };
-    document.getElementById("categorias-list").addEventListener("click", openFrom);
-    document.getElementById("cat-donut-card").addEventListener("click", openFrom);
-    document.getElementById("cat-tx-body").addEventListener("click", (e) => {
-      if (e.target.closest("#btn-cat-tx-more")) { catModalShown += CAT_MODAL_PAGE; renderCatTxModal(); return; }
-      const row = e.target.closest("[data-tx-id]");
-      if (row) openTxDetalhe(row.dataset.txId);
     });
   }, "categorias");
 

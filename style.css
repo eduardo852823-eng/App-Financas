@@ -672,48 +672,18 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 .toast.toast-error{background:var(--red);}
 
-/* ===================== DONUT DE CATEGORIAS ===================== */
-.cat-donut-card{padding:18px 16px 14px; margin-bottom:14px; text-align:center;}
-.cat-donut{display:block; width:100%; max-width:230px; margin:0 auto;}
-.donut-slice{transition:stroke-width .18s ease, opacity .18s ease;}
-.donut-slice.clickable{cursor:pointer;}
-.donut-slice.clickable:hover{stroke-width:33;}
-.donut-slice:not(.clickable){opacity:.8;}
-.donut-center-val{font-size:15px; font-weight:800; fill:var(--text-main);}
-.donut-center-sub{font-size:10.5px; font-weight:600; fill:var(--text-secondary);}
-.donut-hint{font-size:12px; color:var(--text-secondary); margin-top:10px;}
-.cat-row-clickable{cursor:pointer;}
-
-/* modal de transações da categoria */
-.cat-tx-summary{display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--bg-soft); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:14px;}
-.cat-tx-summary-label{font-size:12px; color:var(--text-secondary); font-weight:600;}
-.cat-tx-summary-value{font-size:18px; font-weight:800; margin-top:2px;}
-.cat-tx-summary-value.pos{color:var(--green);}
-.cat-tx-summary-value.neg{color:var(--red);}
-.cat-tx-summary-count{font-size:12.5px; color:var(--text-secondary); font-weight:600;}
-#cat-tx-body .btn{margin-top:6px;}
-
-/* botão gerenciar bancos (Início) */
-.btn-manage-banks{width:100%; margin:6px 0 18px; padding:12px 16px; font-size:14px;}
-
-/* ===================== INVESTIMENTOS ===================== */
-.invest-summary{margin-bottom:14px;}
-.invest-group{margin-bottom:12px; padding:14px;}
-.invest-group-head{display:flex; align-items:center; gap:12px; padding-bottom:10px; margin-bottom:6px; border-bottom:1px solid var(--gray-100);}
-.invest-group-info{flex:1; min-width:0;}
-.invest-group-name{font-size:15px; font-weight:800; color:var(--navy); overflow-wrap:anywhere;}
-.invest-group-rate{font-size:12px; color:var(--text-secondary); margin-top:2px; font-weight:600;}
-.invest-group-total{font-size:15px; font-weight:800; white-space:nowrap;}
-.invest-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0;}
-.invest-row + .invest-row{border-top:1px dashed var(--gray-100);}
-.invest-row-info{flex:1; min-width:0;}
-.invest-row-name{font-size:13.5px; font-weight:700; overflow-wrap:anywhere;}
-.invest-row-sub{font-size:11.5px; color:var(--text-secondary); margin-top:2px;}
-.invest-row-values{text-align:right; white-space:nowrap;}
-.invest-row-amount{font-size:13.5px; font-weight:700;}
-.invest-row-rate{font-size:11.5px; color:var(--green); font-weight:700; margin-top:2px;}
-.invest-note{font-size:11.5px; color:var(--text-secondary); text-align:center; margin:4px 8px 16px;}
-.invest-empty{text-align:center; padding:28px 20px;}
-.invest-empty-icon{font-size:34px; margin-bottom:8px;}
-.invest-empty-title{font-size:16px; font-weight:800; margin-bottom:6px;}
-.invest-empty .subtext{margin-bottom:16px;}
+/* olho de esconder valores */
+.eye-btn{background:rgba(255,255,255,.18); border:none; color:inherit; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;}
+.cat-chart-card{padding:18px 16px; margin-bottom:14px;}
+#cat-donut{display:block; margin:0 auto; max-width:100%;}
+.cat-chart-card .donut-legend{margin-top:16px;}
+/* investimentos */
+.inv-bank{margin-top:14px; padding:14px 16px;}
+.inv-bank-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;}
+.inv-bank-head h3{font-size:15px; margin:0;}
+.inv-row{padding:10px 0; border-top:1px solid var(--gray-200,rgba(128,128,128,.18));}
+.inv-row-top{display:flex; justify-content:space-between; gap:10px; font-size:14px;}
+.inv-name{font-weight:600;} .inv-bal{font-weight:700; white-space:nowrap;}
+.inv-muted{font-size:12px; color:var(--text-secondary);}
+.inv-ago{margin-top:3px; font-size:12.5px;}
+.inv-delta{font-weight:700;} .inv-delta.pos{color:var(--green,#10B981);} .inv-delta.neg{color:var(--red,#EF4444);}
