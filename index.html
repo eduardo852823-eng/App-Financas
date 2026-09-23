@@ -115,9 +115,12 @@
 
         <div class="section-head">
           <h3>Seus bancos</h3>
-          <a href="#" class="link-small" data-nav="bancos">Ver todos ›</a>
         </div>
         <div class="banks-scroll" id="banks-scroll"></div>
+        <button class="btn btn-outline btn-manage-banks" id="btn-gerenciar-bancos" data-nav="bancos">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/></svg>
+          Conectar / gerenciar bancos
+        </button>
 
         <div class="cards-wrap hidden" id="cards-wrap">
           <div class="section-head"><h3>Seus cartões</h3></div>
@@ -142,6 +145,11 @@
           <button class="btn btn-primary btn-add-inst" id="btn-pluggy-connect">+ Conectar banco real (Pluggy)</button>
         </div>
 
+      </section>
+
+      <!-- ---------- INVESTIMENTOS ---------- -->
+      <section class="screen screen-investimentos" data-screen="investimentos">
+        <div id="invest-container"></div>
       </section>
 
       <!-- ---------- TRANSAÇÕES ---------- -->
@@ -169,6 +177,7 @@
           <button class="seg-btn active" data-seg="gastos">Gastos</button>
           <button class="seg-btn" data-seg="ganhos">Ganhos</button>
         </div>
+        <div class="card cat-donut-card" id="cat-donut-card"></div>
         <div id="categorias-list"></div>
       </section>
 
@@ -253,11 +262,22 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
         <span>Relatórios</span>
       </button>
-      <button class="nav-btn" data-nav="bancos">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/></svg>
-        <span>Meus bancos</span>
+      <button class="nav-btn" data-nav="investimentos">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+        <span>Investimentos</span>
       </button>
     </nav>
+  </div>
+
+  <!-- ===================== TRANSAÇÕES DA CATEGORIA (modal) ===================== -->
+  <div class="modal-overlay" id="modal-cat-tx">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="cat-tx-title">Categoria</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body" id="cat-tx-body"></div>
+    </div>
   </div>
 
   <!-- ===================== TRANSAÇÃO DETALHE (modal) ===================== -->

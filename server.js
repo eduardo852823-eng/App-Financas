@@ -142,6 +142,24 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
   data TEXT,
   bills TEXT
 );
+
+CREATE TABLE IF NOT EXISTS pluggy_investments (
+  investment_id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  item_id TEXT NOT NULL,
+  name TEXT,
+  type TEXT,
+  subtype TEXT,
+  institution TEXT,
+  balance REAL,
+  amount_invested REAL,
+  monthly_rate REAL,
+  rate_source TEXT,
+  annual_rate REAL,
+  due_date TEXT,
+  updated_at TEXT,
+  data TEXT
+);
 `);
   // colunas novas em transactions (ignora o erro se já existirem)
   for (const col of ["external_id TEXT", "account_id TEXT", "account_name TEXT", "account_type TEXT"]) {
@@ -900,6 +918,41 @@ async function fetchPluggyBills(accountId, headers) {
   }
 }
 
+// Investimentos de uma conexão (GET /investments?itemId=, paginado). Nem todo item tem investimentos
+// (o MeuPluggy só traz se o usuário tiver investimentos nas instituições conectadas). Devolve null se a
+// chamada falhar (aí a sincronização mantém o que já estava salvo) e [] se simplesmente não houver nada.
+async function fetchPluggyInvestments(itemId, headers) {
+  try {
+    const list = [];
+    let page = 1, totalPages = 1;
+    do {
+      const resp = await fetch(`${PLUGGY_BASE_URL}/investments?itemId=${itemId}&page=${page}&pageSize=500`, { headers });
+      if (!resp.ok) return resp.status === 404 ? [] : null;
+      const data = await resp.json();
+      list.push(...(data.results || []));
+      totalPages = data.totalPages || 1;
+      page++;
+    } while (page <= totalPages && page <= 20);
+    return list;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Taxa mensal (%) de um investimento: usa a rentabilidade do último mês informada pelo Pluggy;
+// se não vier, estima a partir da taxa anual / dos últimos 12 meses (juros compostos).
+function investmentMonthlyRate(inv) {
+  const n = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const last = n(inv.lastMonthRate);
+  if (last !== null) return { rate: last, source: "last_month" };
+  const monthlyFromYear = (yearPct) => (Math.pow(1 + yearPct / 100, 1 / 12) - 1) * 100;
+  const y12 = n(inv.lastTwelveMonthsRate);
+  if (y12 !== null) return { rate: monthlyFromYear(y12), source: "estimated" };
+  const ann = n(inv.annualRate) ?? n(inv.fixedAnnualRate);
+  if (ann !== null) return { rate: monthlyFromYear(ann), source: "estimated" };
+  return { rate: null, source: null };
+}
+
 // Em cartão de crédito o Pluggy manda compra como valor positivo (aumenta a fatura)
 // e pagamento/estorno como negativo; no app compra é saída, então inverte o sinal.
 function pluggyValue(amount, accountType) {
@@ -959,6 +1012,18 @@ app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
   res.json(rows.map(r => ({ ...r, data: parse(r.data), bills: parse(r.bills) || [] })));
 }));
 
+// Investimentos (valor atual + taxa mensal) de todas as conexões do usuário.
+app.get("/api/pluggy/investments", auth, h(async (req, res) => {
+  const rows = await all(
+    `SELECT i.investment_id, i.item_id, i.name, i.type, i.subtype, i.institution, i.balance, i.amount_invested,
+            i.monthly_rate, i.rate_source, i.annual_rate, i.due_date, i.updated_at, p.institution_name AS connection_name
+     FROM pluggy_investments i LEFT JOIN pluggy_items p ON p.item_id = i.item_id
+     WHERE i.user_id = ? ORDER BY i.balance DESC`,
+    [req.userId]
+  );
+  res.json(rows);
+}));
+
 // Desconecta um item (remove do nosso banco e deleta no Pluggy).
 app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM pluggy_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
@@ -974,6 +1039,7 @@ app.delete("/api/pluggy/items/:id", auth, h(async (req, res) => {
   }
   await run("DELETE FROM transactions WHERE user_id = ? AND bank_id = ?", [req.userId, item.item_id]);
   await run("DELETE FROM pluggy_accounts WHERE item_id = ?", [item.item_id]);
+  await run("DELETE FROM pluggy_investments WHERE item_id = ? AND user_id = ?", [item.item_id, req.userId]);
   await run("DELETE FROM pluggy_items WHERE id = ?", [item.id]);
   res.json({ ok: true });
 }));
@@ -1035,6 +1101,7 @@ async function syncPluggyItemData(item, headers) {
   for (const acc of accounts) {
     if (acc.type === "CREDIT") billsByAccount[acc.id] = await fetchPluggyBills(acc.id, headers);
   }
+  const investments = await fetchPluggyInvestments(item.item_id, headers);
   const statements = accounts.map(acc => ({
     sql: `INSERT INTO pluggy_accounts (account_id, user_id, item_id, name, type, balance, updated_at, data, bills)
           VALUES (?,?,?,?,?,?, datetime('now'), ?, ?)
@@ -1050,6 +1117,27 @@ async function syncPluggyItemData(item, headers) {
   // Só uma vez: apaga as transações antigas dessa conexão que foram salvas antes de existir o vínculo com a conta
   if (allOk) {
     statements.push({ sql: "DELETE FROM transactions WHERE user_id = ? AND bank_id = ? AND external_id IS NULL", args: [item.user_id, item.item_id] });
+  }
+  // Investimentos: troca tudo desta conexão pelo que o Pluggy devolveu agora (se a busca falhou, mantém o que já tinha)
+  if (investments) {
+    statements.push({ sql: "DELETE FROM pluggy_investments WHERE item_id = ? AND user_id = ?", args: [item.item_id, item.user_id] });
+    for (const inv of investments) {
+      const { rate, source } = investmentMonthlyRate(inv);
+      const balance = typeof inv.balance === "number" ? inv.balance
+        : typeof inv.value === "number" ? inv.value
+        : typeof inv.amount === "number" ? inv.amount : null;
+      statements.push({
+        sql: `INSERT OR REPLACE INTO pluggy_investments (investment_id, user_id, item_id, name, type, subtype, institution, balance, amount_invested, monthly_rate, rate_source, annual_rate, due_date, updated_at, data)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'), ?)`,
+        args: [
+          inv.id, item.user_id, item.item_id, inv.name || null, inv.type || null, inv.subtype || null,
+          (inv.institution && inv.institution.name) || inv.issuer || null,
+          balance, typeof inv.amount === "number" ? inv.amount : null, rate, source,
+          typeof inv.annualRate === "number" ? inv.annualRate : (typeof inv.fixedAnnualRate === "number" ? inv.fixedAnnualRate : null),
+          inv.dueDate ? String(inv.dueDate).slice(0, 10) : null, JSON.stringify(inv)
+        ]
+      });
+    }
   }
   statements.push(...updStatements); // antes do offset, para não contar como "novas"
   const offset = statements.length;
