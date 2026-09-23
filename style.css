@@ -694,3 +694,14 @@ button:focus:not(:focus-visible), .nav-btn:focus:not(:focus-visible){outline:non
 .catdet-head{display:flex; align-items:center; gap:12px; padding:14px 16px; margin-bottom:14px;}
 .catdet-head .cat-amount{margin-left:auto;}
 .catdet-total.neg{color:var(--red,#EF4444);} .catdet-total.pos{color:var(--green,#10B981);}
+
+.add-bank-chip{cursor:pointer; text-align:left; border:1.5px dashed var(--gray-300,#cbd3e1); background:transparent; font:inherit; color:inherit; min-width:96px;}
+.add-bank-chip .add-icon{background:var(--gray-100,#EEF2F8)!important; color:var(--blue,#6200EA)!important; font-size:20px;}
+.card-balance .inv-muted{color:rgba(255,255,255,.9);}
+.card-balance .inv-delta.pos{color:#7CFFB8;} .card-balance .inv-delta.neg{color:#FFB4B4;}
+
+.has-logo{overflow:hidden; border:1px solid rgba(128,128,128,.2); padding:0;}
+.has-logo img{width:70%; height:70%; object-fit:contain; display:block;}
+.bank-avatar.sm{width:30px; height:30px; border-radius:8px; font-size:11px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800;}
+.inv-bank-title{display:flex; align-items:center; gap:10px;}
+.inv-edit-date{cursor:pointer;}

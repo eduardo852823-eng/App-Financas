@@ -167,6 +167,9 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     name TEXT, type TEXT, subtype TEXT, balance REAL, amount_original REAL, profit REAL,
     applied_date TEXT, due_date TEXT, updated_at TEXT
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS inv_manual (
+    user_id INTEGER NOT NULL, inv_id TEXT NOT NULL, applied_date TEXT, PRIMARY KEY (user_id, inv_id)
+  )`);
   await db.execute(`CREATE TABLE IF NOT EXISTS inv_daily_history (
     user_id INTEGER NOT NULL, item_id TEXT NOT NULL, inv_id TEXT NOT NULL, day TEXT NOT NULL, balance REAL,
     PRIMARY KEY (user_id, inv_id, day)
@@ -971,9 +974,19 @@ app.get("/api/pluggy/accounts", auth, h(async (req, res) => {
 
 // Investimentos + histórico diário (últimos 120 dias). Só devolve o que existe: banco sem investimento não aparece.
 app.get("/api/investments", auth, h(async (req, res) => {
-  const investments = await all("SELECT inv_id, item_id, name, type, subtype, balance, amount_original, profit, applied_date, due_date, updated_at FROM inv_positions WHERE user_id = ?", [req.userId]);
+  const investments = await all(`SELECT p.inv_id, p.item_id, p.name, p.type, p.subtype, p.balance, p.amount_original, p.profit,
+      COALESCE(m.applied_date, p.applied_date) AS applied_date, p.due_date, p.updated_at
+    FROM inv_positions p LEFT JOIN inv_manual m ON m.user_id = p.user_id AND m.inv_id = p.inv_id WHERE p.user_id = ?`, [req.userId]);
   const history = await all("SELECT item_id, inv_id, day, balance FROM inv_daily_history WHERE user_id = ? AND day >= date('now','-120 days') ORDER BY day", [req.userId]);
   res.json({ investments, history });
+}));
+
+// O usuário corrige a data em que aplicou (o Pluggy às vezes manda a data de cadastro/sync).
+app.put("/api/investments/:invId/date", auth, h(async (req, res) => {
+  const date = String(req.body?.date || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Data inválida" });
+  await run("INSERT OR REPLACE INTO inv_manual (user_id, inv_id, applied_date) VALUES (?,?,?)", [req.userId, req.params.invId, date]);
+  res.json({ ok: true });
 }));
 
 // Desconecta um item (remove do nosso banco e deleta no Pluggy).

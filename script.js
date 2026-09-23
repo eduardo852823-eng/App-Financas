@@ -39,6 +39,25 @@ function fmtBRL(v) {
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+// Logo real do banco (favicon do site oficial); se não carregar ou não for reconhecido, cai para as iniciais coloridas
+const BANK_DOMAINS = [
+  ["inter", "inter.co"], ["brasil", "bb.com.br"], ["caixa", "caixa.gov.br"], ["nubank", "nubank.com.br"], ["nu pagamentos", "nubank.com.br"],
+  ["itau", "itau.com.br"], ["bradesco", "bradesco.com.br"], ["santander", "santander.com.br"], ["brb", "brb.com.br"],
+  ["c6", "c6bank.com.br"], ["btg", "btgpactual.com"], ["mercado pago", "mercadopago.com.br"], ["mercadopago", "mercadopago.com.br"],
+  ["sicoob", "sicoob.com.br"], ["sicredi", "sicredi.com.br"], ["xp", "xpi.com.br"], ["picpay", "picpay.com"], ["neon", "neon.com.br"]
+];
+function bankDomain(name) {
+  const n = String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const hit = BANK_DOMAINS.find(([k]) => new RegExp("(^|[^a-z0-9])" + k + "([^a-z0-9]|$)").test(n));
+  return hit ? hit[1] : null;
+}
+// cls = classe do quadradinho (bank-icon, tx-icon, bank-avatar); bankName = nome usado para achar a logo; text = iniciais de reserva
+function bankLogo(cls, bankName, color, text) {
+  const ini = initials(text || bankName);
+  const dom = bankDomain(bankName);
+  if (!dom) return `<div class="${cls}" style="background:${color}">${ini}</div>`;
+  return `<div class="${cls} has-logo" style="background:#fff"><img src="https://www.google.com/s2/favicons?domain=${dom}&sz=128" alt="" loading="lazy" onerror="this.parentElement.style.background='${color}';this.parentElement.classList.remove('has-logo');this.parentElement.textContent='${ini}'"></div>`;
+}
 function initials(name) { return esc(String(name || "").split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()); }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
@@ -207,6 +226,7 @@ function accountLabel(a) {
 function connectedBanks() {
   return state.accounts.map(a => ({
     id: a.account_id, name: accountLabel(a), color: pluggyColorFor(a.account_id),
+    logoName: prettyName((state.accounts.find(x => x.item_id === a.item_id && x.type !== "CREDIT") || a).name),
     type: a.type, balance: a.balance, connected: true
   }));
 }
@@ -440,11 +460,15 @@ function renderDashboard() {
   banksScroll.innerHTML = banks.map(i => {
     const val = typeof i.balance === "number" ? i.balance : state.transactions.filter(t => t.bank_id === i.id).reduce((s,t) => s + t.value, 0);
     return `<div class="bank-chip">
-      <div class="bank-icon" style="background:${i.color}">${initials(i.name)}</div>
+      ${bankLogo("bank-icon", i.logoName || i.name, i.color, i.name)}
       <div class="bank-amount">${fmtBRL(val)}</div>
       <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${esc(i.name)}</div>
     </div>`;
-  }).join("") || `<div class="empty-state">Nenhum banco conectado ainda.</div>`;
+  }).join("") + `<button type="button" class="bank-chip add-bank-chip" data-nav="bancos">
+      <div class="bank-icon add-icon">+</div>
+      <div class="bank-amount">Adicionar</div>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">banco</div>
+    </button>`;
 
   renderCards();
 }
@@ -488,7 +512,7 @@ function renderEntradasSaidas() {
     const g = groups[name];
     return `<div class="es-bank-group">
       <div class="es-bank-head">
-        <div class="es-bank-name"><span class="tx-icon" style="background:${g.info.color}">${initials(name)}</span>${esc(name)}</div>
+        <div class="es-bank-name">${bankLogo("tx-icon", g.info.logoName || name, g.info.color, name)}${esc(name)}</div>
         <div class="es-bank-total ${tipo === "entrada" ? "pos" : "neg"}">${tipo === "entrada" ? "+ " : "- "}${fmtBRL(g.total)}</div>
       </div>
       ${g.items.map(t => txRowHtml(t)).join("")}
@@ -652,16 +676,30 @@ function itemTitle(itemId) {
 }
 // Saldo de um investimento ~30 dias atrás (snapshot mais próximo, sem passar de 30 dias). null = ainda sem histórico.
 function invBalanceAgo(invId, days = 30) {
+  const today = ymdLocal(new Date());
   const target = ymdLocal(new Date(Date.now() - days * 86400000));
   const rows = (state.investHistory || []).filter(r => r.inv_id === invId);
   const before = rows.filter(r => r.day <= target).pop();
   if (before) return { balance: before.balance, day: before.day };
+  // ainda não tem 30 dias de histórico: compara com o primeiro dia registrado (se não for hoje)
+  const first = rows[0];
+  if (first && first.day < today) return { balance: first.balance, day: first.day, since: true };
   return null;
 }
 function deltaHtml(now, ago) {
-  if (!ago) return `<span class="inv-muted">Histórico começa hoje; a comparação aparece após 1 mês</span>`;
+  if (!ago) return `<span class="inv-muted">Comparação começa a valer a partir de hoje</span>`;
   const d = now - ago.balance, cls = d >= 0 ? "pos" : "neg";
-  return `<span class="inv-delta ${cls}">${d >= 0 ? "▲ +" : "▼ "}${fmtBRL(d)}</span> <span class="inv-muted">vs ${fmtDate(ago.day)} (${fmtBRL(ago.balance)})</span>`;
+  return `<span class="inv-delta ${cls}">${d >= 0 ? "▲ +" : "▼ "}${fmtBRL(d)}</span> <span class="inv-muted">${ago.since ? "desde" : "vs"} ${fmtDate(ago.day)} (${fmtBRL(ago.balance)})</span>`;
+}
+async function editInvDate(invId, current) {
+  const shown = current ? current.split("-").reverse().join("/") : "";
+  const ans = prompt("Data em que você aplicou (dd/mm/aaaa):", shown);
+  if (ans === null) return;
+  const m = ans.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) { showToast("Use o formato dd/mm/aaaa", { error: true }); return; }
+  const iso = `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  try { await api(`/investments/${encodeURIComponent(invId)}/date`, { method: "PUT", body: { date: iso } }); await refreshInvestments(); renderInvestimentos(); }
+  catch (e) { showToast(e.message || "Não foi possível salvar", { error: true }); }
 }
 function renderInvestimentos() {
   const invs = (state.investments || []).filter(v => v.balance > 0 || v.balance < 0);
@@ -676,7 +714,7 @@ function renderInvestimentos() {
   const agoTotals = invs.map(v => invBalanceAgo(v.inv_id));
   const allAgo = agoTotals.every(Boolean);
   const agoSum = allAgo ? agoTotals.reduce((s, a) => s + a.balance, 0) : null;
-  document.getElementById("inv-change").innerHTML = deltaHtml(total, allAgo ? { balance: agoSum, day: agoTotals[0].day } : null);
+  document.getElementById("inv-change").innerHTML = deltaHtml(total, allAgo ? { balance: agoSum, day: agoTotals[0].day, since: agoTotals.some(a => a.since) } : null);
   const byItem = {};
   invs.forEach(v => (byItem[v.item_id] = byItem[v.item_id] || []).push(v));
   list.innerHTML = Object.entries(byItem).map(([itemId, arr]) => {
@@ -687,11 +725,11 @@ function renderInvestimentos() {
       const lucro = v.profit != null ? ` · Rendimento ${fmtBRL(v.profit)}` : "";
       return `<div class="inv-row">
         <div class="inv-row-top"><div class="inv-name">${esc(v.name)}</div><div class="inv-bal">${fmtBRL(v.balance)}</div></div>
-        ${aplic || lucro ? `<div class="inv-muted">${aplic}${lucro}</div>` : ""}
+        <div class="inv-muted inv-edit-date" data-inv-id="${esc(v.inv_id)}" data-date="${v.applied_date || ""}">${aplic || "Aplicação sem data"}${lucro} ✎</div>
         <div class="inv-ago">${deltaHtml(v.balance, ago)}</div>
       </div>`;
     }).join("");
-    return `<div class="card inv-bank"><div class="inv-bank-head"><h3>${esc(itemTitle(itemId))}</h3><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
+    return `<div class="card inv-bank"><div class="inv-bank-head"><div class="inv-bank-title">${bankLogo("bank-avatar sm", itemTitle(itemId), "#6200EA")}<h3>${esc(itemTitle(itemId))}</h3></div><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
   }).join("");
 }
 
@@ -756,7 +794,7 @@ function txRowHtml(t) {
   const isPos = t.value >= 0;
   return `<div class="tx-row" data-tx-id="${t.id}">
     <div class="tx-row-left">
-      <div class="tx-icon" style="background:${info.color}">${initials(t.desc)}</div>
+      ${bankLogo("tx-icon", info.logoName || info.name, info.color, t.desc)}
       <div>
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
@@ -1332,7 +1370,7 @@ function renderPluggyItems() {
       const isCard = a.type === "CREDIT";
       const val = isCard ? cardUsed(a) : num(a.balance);
       return `<div class="inst-acc">
-        <div class="bank-avatar" style="background:${pluggyColorFor(a.account_id)}">${initials(accountLabel(a))}</div>
+        ${bankLogo("bank-avatar", title, pluggyColorFor(a.account_id), accountLabel(a))}
         <div class="inst-acc-info">
           <div class="inst-acc-name">${esc(accountLabel(a))}</div>
           <div class="inst-acc-sub">${esc(accountTypeLabel(a))}${a.data?.number ? ` • final ${esc(a.data.number)}` : ""}</div>
@@ -1565,6 +1603,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("catdet-container").addEventListener("click", (e) => {
       const row = e.target.closest("[data-tx-id]");
       if (row) openTxDetalhe(row.dataset.txId);
+    });
+    document.getElementById("inv-list").addEventListener("click", (e) => {
+      const r = e.target.closest(".inv-edit-date");
+      if (r) editInvDate(r.dataset.invId, r.dataset.date);
     });
     const openCat = (e) => { const r = e.target.closest("[data-cat]"); if (r) openCategoriaDetalhe(r.dataset.cat); };
     document.getElementById("categorias-list").addEventListener("click", openCat);
