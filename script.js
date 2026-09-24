@@ -1037,31 +1037,37 @@ function renderPlanejamento() {
 }
 function renderPlanFuturos() {
   document.getElementById("plan-month-label").textContent = monthLabel(planMonth);
+  // O planejamento é um mundo à parte: ignora completamente o saldo real da conta
+  // (transações de verdade). Cada mês começa "zerado" e o resultado vem só do que
+  // foi planejado (e do que já foi de fato marcado como pago) dentro da própria aba.
   const items = planItemsCache.filter(p => p.month === planMonth).sort((a, b) => (a.paid - b.paid) || (a.id - b.id));
-  const planejado = items.filter(p => !p.paid && p.type === "saida").reduce((s, p) => s + p.value, 0);
-  const gastoReal = state.transactions.filter(t => t.date.slice(0, 7) === planMonth && t.type === "saida" && !isCreditTx(t)).reduce((s, t) => s + Math.abs(t.value), 0);
-  const recebido = state.transactions.filter(t => t.date.slice(0, 7) === planMonth && t.type === "entrada").reduce((s, t) => s + t.value, 0);
-  const resta = recebido - gastoReal - planejado;
-  document.getElementById("plan-sum-planejado").textContent = fmtBRL(planejado);
-  document.getElementById("plan-sum-gasto").textContent = fmtBRL(gastoReal);
-  document.getElementById("plan-sum-recebido").textContent = fmtBRL(recebido);
-  const restaEl = document.getElementById("plan-sum-resta");
-  restaEl.textContent = fmtBRL(Math.abs(resta));
-  restaEl.style.color = resta >= 0 ? "var(--green)" : "var(--out)";
-  document.getElementById("plan-sum-resta-label").textContent = resta >= 0 ? "Sobra" : "Falta";
+  const ganhoPlanejado = items.filter(p => p.type === "entrada").reduce((s, p) => s + p.value, 0);
+  const gastoPlanejado = items.filter(p => p.type === "saida").reduce((s, p) => s + p.value, 0);
+  const jaPago = items.filter(p => p.paid).reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
+  const resultado = ganhoPlanejado - gastoPlanejado;
+  document.getElementById("plan-sum-planejado").textContent = fmtBRL(ganhoPlanejado);
+  document.getElementById("plan-sum-gasto").textContent = fmtBRL(gastoPlanejado);
+  document.getElementById("plan-sum-recebido").textContent = fmtBRL(Math.abs(jaPago));
+  const resEl = document.getElementById("plan-sum-resta");
+  resEl.textContent = fmtBRL(Math.abs(resultado));
+  const resCard = document.getElementById("plan-sum-resta-card");
+  resCard.classList.toggle("card-green", resultado >= 0);
+  resCard.classList.toggle("card-red", resultado < 0);
+  document.getElementById("plan-sum-resta-label").textContent = resultado >= 0 ? "Lucro do mês" : "Prejuízo do mês";
   const el = document.getElementById("plan-list");
   if (!items.length) { el.innerHTML = `<div class="empty-state">Nada planejado para ${esc(monthLabel(planMonth))} ainda.</div>`; return; }
   el.innerHTML = items.map(p => `
     <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
+      ${p.paid ? `<div class="plan-row-badge">${ICONS.check(12)} Pago</div>` : ""}
       <div class="plan-row-main">
         <div class="plan-row-name">${esc(p.name)}</div>
-        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"}${p.paid ? " • pago" : ""}</div>
+        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado</div>
       </div>
       <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
       <div class="plan-row-actions">
         ${p.paid
-          ? `<button type="button" class="btn-link-small" data-plan-unpay="${p.id}">Desfazer</button>`
-          : `<button type="button" class="btn-connect" data-plan-pay="${p.id}">Marcar como pago</button>
+          ? `<button type="button" class="btn-outline" data-plan-unpay="${p.id}">Desfazer</button>`
+          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">Marcar como pago</button>
              <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
         <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
       </div>
@@ -1120,18 +1126,28 @@ async function confirmMarkPaid(btn) {
   const id = payPlanId; if (!id) return;
   await withLoading(btn, async () => {
     try {
-      await api(`/planned/${id}/pay`, { method: "POST" });
-      await refreshTransactions();
+      const updated = await api(`/planned/${id}/pay`, { method: "POST" });
+      // Atualiza o cache local na hora (não depende só do refetch) para o item
+      // mudar de status na lista imediatamente, sem esperar outra ida ao servidor.
+      const idx = planItemsCache.findIndex(p => p.id === Number(id));
+      if (idx !== -1) planItemsCache[idx] = { ...planItemsCache[idx], ...updated, paid: true };
       payPlanId = null;
       closeAllModals();
-      renderPlanejamento();
+      renderPlanFuturos();
       showToast("Marcado como pago e lançado nas transações.");
+      refreshTransactions().catch(() => {});
     } catch (e) { showToast("Não foi possível marcar como pago: " + e.message, { error: true }); }
   });
 }
 async function unpayPlanItem(id) {
   if (!confirm("Desfazer? A transação criada vai ser apagada.")) return;
-  try { await api(`/planned/${id}/unpay`, { method: "POST" }); await refreshTransactions(); renderPlanejamento(); }
+  try {
+    await api(`/planned/${id}/unpay`, { method: "POST" });
+    const idx = planItemsCache.findIndex(p => p.id === Number(id));
+    if (idx !== -1) planItemsCache[idx] = { ...planItemsCache[idx], paid: false, tx_id: null };
+    renderPlanFuturos();
+    refreshTransactions().catch(() => {});
+  }
   catch (e) { showToast("Não foi possível desfazer: " + e.message, { error: true }); }
 }
 
@@ -1179,18 +1195,35 @@ function renderMetas() {
     </div>`;
   }).join("");
 }
+const MES_ABREV = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+// Todos os goals de meses específicos (não fixos) de uma categoria, dentro do ano informado.
+function specificGoalsFor(category, year) {
+  return goalsCache.filter(g => g.category === category && g.month && g.month.startsWith(year));
+}
+function renderMesesGrid(category, year) {
+  const set = new Set(specificGoalsFor(category, year).map(g => g.month));
+  const grid = document.getElementById("meta-meses-grid");
+  grid.innerHTML = MES_ABREV.map((label, i) => {
+    const ym = `${year}-${String(i + 1).padStart(2, "0")}`;
+    return `<button type="button" class="month-check ${set.has(ym) ? "active" : ""}" data-mes="${ym}">${label}</button>`;
+  }).join("");
+}
 function openMetaModal(catId) {
   editingGoalCategory = catId;
   const ym = planMonth || curYm();
+  const year = ym.slice(0, 4);
   const goal = goalFor(catId, ym);
+  const specificos = specificGoalsFor(catId, year);
   editingGoalId = goal ? goal.id : null;
   const info = catInfo(catId);
   document.getElementById("meta-modal-title").textContent = `Meta — ${info.name}`;
   document.getElementById("meta-valor").value = goal ? String(goal.value).replace(".", ",") : "";
-  const tipo = goal && goal.month ? "unico" : "fixo";
+  const tipo = specificos.length ? "especifico" : "fixo";
   document.querySelectorAll("#meta-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.metatipo === tipo));
+  renderMesesGrid(catId, year);
+  document.getElementById("meta-meses-grid").classList.toggle("hidden", tipo !== "especifico");
   document.getElementById("meta-error").classList.add("hidden");
-  document.getElementById("btn-remover-meta").classList.toggle("hidden", !goal);
+  document.getElementById("btn-remover-meta").classList.toggle("hidden", !goal && !specificos.length);
   openModal("modal-meta");
 }
 async function saveMeta() {
@@ -1200,16 +1233,37 @@ async function saveMeta() {
   errEl.classList.add("hidden");
   if (!value || value <= 0) { errEl.textContent = "Informe um valor válido."; errEl.classList.remove("hidden"); return; }
   const ym = planMonth || curYm();
+  const year = ym.slice(0, 4);
   try {
-    await api("/goals", { method: "POST", body: { category: editingGoalCategory, value, month: tipo === "unico" ? ym : null } });
+    if (tipo === "fixo") {
+      await api("/goals", { method: "POST", body: { category: editingGoalCategory, value, month: null } });
+      // remove metas de meses específicos que existiam, já que agora é fixa para todo mês
+      for (const g of specificGoalsFor(editingGoalCategory, year)) await api(`/goals/${g.id}`, { method: "DELETE" });
+    } else {
+      const selected = Array.from(document.querySelectorAll("#meta-meses-grid .month-check.active")).map(b => b.dataset.mes);
+      if (!selected.length) { errEl.textContent = "Escolha ao menos um mês."; errEl.classList.remove("hidden"); return; }
+      const existentes = specificGoalsFor(editingGoalCategory, year);
+      const paraRemover = existentes.filter(g => !selected.includes(g.month));
+      for (const g of paraRemover) await api(`/goals/${g.id}`, { method: "DELETE" });
+      for (const month of selected) await api("/goals", { method: "POST", body: { category: editingGoalCategory, value, month } });
+    }
     closeAllModals();
     renderPlanejamento();
+    showToast("Meta salva.");
   } catch (e) { errEl.textContent = e.message || "Não foi possível salvar a meta."; errEl.classList.remove("hidden"); }
 }
 async function removeMeta() {
-  if (!editingGoalId) { closeAllModals(); return; }
-  try { await api(`/goals/${editingGoalId}`, { method: "DELETE" }); closeAllModals(); renderPlanejamento(); }
-  catch (e) { showToast("Não foi possível remover: " + e.message, { error: true }); }
+  const ym = planMonth || curYm();
+  const year = ym.slice(0, 4);
+  const ids = new Set();
+  if (editingGoalId) ids.add(editingGoalId);
+  specificGoalsFor(editingGoalCategory, year).forEach(g => ids.add(g.id));
+  if (!ids.size) { closeAllModals(); return; }
+  try {
+    for (const id of ids) await api(`/goals/${id}`, { method: "DELETE" });
+    closeAllModals();
+    renderPlanejamento();
+  } catch (e) { showToast("Não foi possível remover: " + e.message, { error: true }); }
 }
 
 /* ============================================================
@@ -2454,6 +2508,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("meta-tipo-seg").addEventListener("click", (e) => {
       const b = e.target.closest(".seg-btn"); if (!b) return;
       document.querySelectorAll("#meta-tipo-seg .seg-btn").forEach(x => x.classList.toggle("active", x === b));
+      document.getElementById("meta-meses-grid").classList.toggle("hidden", b.dataset.metatipo !== "especifico");
+    });
+    document.getElementById("meta-meses-grid").addEventListener("click", (e) => {
+      const b = e.target.closest(".month-check"); if (!b) return;
+      b.classList.toggle("active");
     });
     document.getElementById("btn-salvar-meta").addEventListener("click", (e) => withLoading(e.currentTarget, saveMeta));
     document.getElementById("btn-remover-meta").addEventListener("click", (e) => withLoading(e.currentTarget, removeMeta));

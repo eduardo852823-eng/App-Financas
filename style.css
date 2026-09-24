@@ -1159,19 +1159,32 @@ body{overscroll-behavior-y:none;}
 .cc-more:active{opacity:.75;}
 
 .plan-summary-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px;}
-.plan-sum-card{background:var(--card-bg); border-radius:var(--radius-md); padding:12px 14px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:4px;}
+.plan-sum-card{background:var(--card-bg); border-radius:var(--radius-md); padding:12px 14px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:4px; transition:transform .18s ease;}
 .plan-sum-card .mini-value{font-size:16px; font-weight:800; font-variant-numeric:tabular-nums;}
+.plan-sum-result{grid-column:1 / -1; padding:16px 18px; border:1.5px solid var(--gray-200);}
+.plan-sum-result .mini-label{font-size:13px;}
+.plan-sum-result .mini-value{font-size:24px;}
+.plan-sum-result.card-green{background:var(--green-bg); border-color:var(--green);}
+.plan-sum-result.card-green .mini-value{color:var(--green);}
+.plan-sum-result.card-red{background:var(--red-bg); border-color:var(--out);}
+.plan-sum-result.card-red .mini-value{color:var(--out);}
 
-.plan-row{display:flex; align-items:center; gap:10px; background:var(--card-bg); border-radius:var(--radius-md); padding:12px 14px; box-shadow:var(--shadow); margin-bottom:9px; flex-wrap:wrap;}
-.plan-row.paid{opacity:.6;}
+.plan-row{position:relative; display:flex; align-items:center; gap:10px; background:var(--card-bg); border-radius:var(--radius-md); padding:12px 14px; box-shadow:var(--shadow); margin-bottom:9px; flex-wrap:wrap; border-left:3px solid transparent; transition:border-color .2s ease;}
+.plan-row.paid{border-left-color:var(--green);}
+.plan-row-badge{display:flex; align-items:center; gap:4px; background:var(--green-bg); color:var(--green); font-size:11px; font-weight:800; padding:3px 8px; border-radius:20px; letter-spacing:.2px;}
 .plan-row-main{flex:1; min-width:120px;}
 .plan-row-name{font-weight:700; font-size:14px;}
 .plan-row-sub{font-size:12px; color:var(--text-secondary); margin-top:2px;}
 .plan-row-value{font-weight:800; font-variant-numeric:tabular-nums; font-size:14px;}
 .plan-row-value.pos{color:var(--green);} .plan-row-value.neg{color:var(--out);}
 .plan-row-actions{display:flex; align-items:center; gap:6px; width:100%; justify-content:flex-end; margin-top:6px;}
-.plan-row-actions .btn-connect{margin:0; padding:8px 14px; font-size:12.5px; width:auto;}
 .plan-row-actions .icon-btn{width:32px; height:32px; border-radius:50%; background:var(--gray-100);}
+
+.btn-pay{border:none; background:var(--blue); color:#fff; font-weight:700; font-size:12.5px; padding:9px 16px; border-radius:20px; cursor:pointer; box-shadow:0 6px 16px rgba(var(--accent-rgb),0.3); transition:transform .16s cubic-bezier(.2,.9,.3,1.4), box-shadow .16s ease;}
+.btn-pay:hover{transform:translateY(-2px); box-shadow:0 10px 22px rgba(var(--accent-rgb),0.4);}
+.btn-pay:active{transform:scale(0.96);}
+.btn-outline{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12.5px; padding:8px 15px; border-radius:20px; cursor:pointer; transition:border-color .16s ease, color .16s ease, transform .16s ease;}
+.btn-outline:hover{border-color:var(--blue); color:var(--blue); transform:translateY(-1px);}
 
 .plan-error{color:var(--out); font-size:13px; margin-top:8px;}
 
@@ -1184,3 +1197,9 @@ body{overscroll-behavior-y:none;}
 .meta-bar{max-width:none; margin:10px 0 6px;}
 .meta-status{font-size:12.5px; font-weight:700; color:var(--green);}
 .meta-status.over{color:var(--out);}
+
+.month-check-grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:12px;}
+.month-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12.5px; padding:9px 4px; border-radius:12px; cursor:pointer; transition:all .16s ease;}
+.month-check:hover{border-color:var(--blue);}
+.month-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 6px 14px rgba(var(--accent-rgb),0.3);}
+.month-check-grid.hidden{display:none;}
