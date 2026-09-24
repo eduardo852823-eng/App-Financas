@@ -1019,12 +1019,13 @@ function renderLegend(elId, byCat, total) {
    ============================================================ */
 let planItemsCache = [];
 let goalsCache = [];
+let subtitlesCache = [];
 function parseValorInput(str) {
   const n = Number(String(str || "").replace(/\./g, "").replace(",", "."));
   return isFinite(n) ? n : NaN;
 }
 async function loadPlanData() {
-  [planItemsCache, goalsCache] = await Promise.all([api("/planned"), api("/goals")]);
+  [planItemsCache, goalsCache, subtitlesCache] = await Promise.all([api("/planned"), api("/goals"), api("/subtitles")]);
 }
 function renderPlanejamento() {
   if (!planMonth) planMonth = curYm();
@@ -1034,6 +1035,24 @@ function renderPlanejamento() {
   loadPlanData().then(() => {
     if (planMode === "futuros") renderPlanFuturos(); else renderMetas();
   }).catch(e => showToast("Não foi possível carregar o planejamento: " + e.message, { error: true }));
+}
+function planItemRowHtml(p) {
+  return `
+    <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
+      ${p.paid ? `<div class="plan-row-badge">${ICONS.check(12)} Pago</div>` : ""}
+      <div class="plan-row-main">
+        <div class="plan-row-name">${esc(p.name)}</div>
+        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado</div>
+      </div>
+      <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
+      <div class="plan-row-actions">
+        ${p.paid
+          ? `<button type="button" class="btn-outline" data-plan-unpay="${p.id}">Desfazer</button>`
+          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">Marcar como pago</button>
+             <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
+        <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
+      </div>
+    </div>`;
 }
 function renderPlanFuturos() {
   document.getElementById("plan-month-label").textContent = monthLabel(planMonth);
@@ -1056,56 +1075,127 @@ function renderPlanFuturos() {
   document.getElementById("plan-sum-resta-label").textContent = resultado >= 0 ? "Lucro do mês" : "Prejuízo do mês";
   const el = document.getElementById("plan-list");
   if (!items.length) { el.innerHTML = `<div class="empty-state">Nada planejado para ${esc(monthLabel(planMonth))} ainda.</div>`; return; }
-  el.innerHTML = items.map(p => `
-    <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
-      ${p.paid ? `<div class="plan-row-badge">${ICONS.check(12)} Pago</div>` : ""}
-      <div class="plan-row-main">
-        <div class="plan-row-name">${esc(p.name)}</div>
-        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado</div>
-      </div>
-      <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
-      <div class="plan-row-actions">
-        ${p.paid
-          ? `<button type="button" class="btn-outline" data-plan-unpay="${p.id}">Desfazer</button>`
-          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">Marcar como pago</button>
-             <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
-        <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
-      </div>
-    </div>`).join("");
+
+  // Agrupa por categoria > subtítulo, pra somar Mercado + Shopping e bater com o total de Compras.
+  const semCategoria = items.filter(p => !p.category);
+  const porCategoria = {};
+  items.filter(p => p.category).forEach(p => { (porCategoria[p.category] = porCategoria[p.category] || []).push(p); });
+
+  let html = "";
+  if (semCategoria.length) html += semCategoria.map(planItemRowHtml).join("");
+  html += Object.keys(porCategoria).sort((a, b) => catInfo(a).name.localeCompare(catInfo(b).name)).map(catId => {
+    const catItems = porCategoria[catId];
+    const info = catInfo(catId);
+    const total = catItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
+    const semSub = catItems.filter(p => !p.subtitle);
+    const porSub = {};
+    catItems.filter(p => p.subtitle).forEach(p => { (porSub[p.subtitle] = porSub[p.subtitle] || []).push(p); });
+    const subHtml = Object.keys(porSub).sort().map(sub => {
+      const subItems = porSub[sub];
+      const subTotal = subItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
+      return `<div class="plan-subtitle-head"><span>${esc(sub)}</span><b>${fmtBRL(Math.abs(subTotal))}</b></div>${subItems.map(planItemRowHtml).join("")}`;
+    }).join("");
+    return `<div class="plan-cat-group">
+      <div class="plan-cat-head"><span class="cat-icon" style="background:${info.color}">${info.icon}</span><span class="plan-cat-name">${esc(info.name)}</span><b class="plan-cat-total">${fmtBRL(Math.abs(total))}</b></div>
+      ${semSub.map(planItemRowHtml).join("")}
+      ${subHtml}
+    </div>`;
+  }).join("");
+  el.innerHTML = html;
 }
 function changePlanMonth(delta) { planMonth = shiftYm(planMonth || curYm(), delta); renderPlanFuturos(); }
 
+/* ---------- modal de novo/editar gasto futuro (categoria + subtítulo + vários meses de uma vez) ---------- */
+let planModalYear = null;      // ano sendo exibido na grade de meses do modal
+let planModalSelected = new Set(); // meses marcados ("AAAA-MM"), acumula entre trocas de ano
+function refreshSubtitleOptions() {
+  const catId = document.getElementById("plan-categoria").value;
+  const wrap = document.getElementById("plan-subtitulo-wrap");
+  const label = document.getElementById("plan-subtitulo-label");
+  if (!catId) { wrap.classList.add("hidden"); label.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden"); label.classList.remove("hidden");
+  const sel = document.getElementById("plan-subtitulo");
+  const current = sel.value;
+  const opts = subtitlesCache.filter(s => s.category === catId);
+  sel.innerHTML = `<option value="">Sem subtítulo</option>` + opts.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
+  if (opts.some(s => s.name === current)) sel.value = current;
+}
+function renderPlanMesesGrid() {
+  document.getElementById("plan-mes-year-label").textContent = planModalYear;
+  const grid = document.getElementById("plan-meses-grid");
+  grid.innerHTML = MES_ABREV.map((label, i) => {
+    const ym = `${planModalYear}-${String(i + 1).padStart(2, "0")}`;
+    return `<button type="button" class="month-check ${planModalSelected.has(ym) ? "active" : ""}" data-mes="${ym}">${label}</button>`;
+  }).join("");
+  const n = planModalSelected.size;
+  document.getElementById("plan-meses-hint").textContent = n
+    ? `${n} mês${n > 1 ? "es" : ""} selecionado${n > 1 ? "s" : ""} — vai criar ${n} item${n > 1 ? "s" : ""} de ${fmtBRL(parseValorInput(document.getElementById("plan-valor").value) || 0)} cada.`
+    : "Escolha um ou mais meses (pode trocar o ano com as setas).";
+}
 function openPlanModal(id) {
   editingPlanId = id || null;
   const item = id ? planItemsCache.find(p => p.id === Number(id)) : null;
   document.getElementById("plan-modal-title").textContent = item ? "Editar item" : "Novo item";
   document.getElementById("plan-nome").value = item ? item.name : "";
   document.getElementById("plan-valor").value = item ? String(item.value).replace(".", ",") : "";
-  document.getElementById("plan-mes").value = item ? item.month : (planMonth || curYm());
   const tipo = item ? item.type : "saida";
   document.querySelectorAll("#plan-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.tipo === tipo));
+
+  const catSel = document.getElementById("plan-categoria");
+  catSel.innerHTML = `<option value="">Sem categoria</option>` + allCategories().map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  catSel.value = item && item.category ? item.category : "";
+  refreshSubtitleOptions();
+  if (item && item.subtitle) document.getElementById("plan-subtitulo").value = item.subtitle;
+  document.getElementById("plan-subtitulo-novo").value = "";
+
+  const baseMonth = item ? item.month : (planMonth || curYm());
+  planModalYear = baseMonth.slice(0, 4);
+  planModalSelected = new Set([baseMonth].filter(() => item)); // editando: só o mês do item; novo: começa vazio
+  document.getElementById("plan-mes-label").textContent = item ? "Mês em que esse gasto cai" : "Em quais meses isso vai acontecer";
+  document.getElementById("plan-meses-hint").classList.toggle("hidden", !!item);
+  renderPlanMesesGrid();
+
   document.getElementById("plan-error").classList.add("hidden");
   openModal("modal-planejado");
+}
+async function addSubtituloInline() {
+  const catId = document.getElementById("plan-categoria").value;
+  const name = document.getElementById("plan-subtitulo-novo").value.trim();
+  if (!catId) { showToast("Escolha uma categoria antes de criar o subtítulo.", { error: true }); return; }
+  if (!name) return;
+  try {
+    const created = await api("/subtitles", { method: "POST", body: { category: catId, name } });
+    if (!subtitlesCache.some(s => s.id === created.id)) subtitlesCache.push(created);
+    document.getElementById("plan-subtitulo-novo").value = "";
+    refreshSubtitleOptions();
+    document.getElementById("plan-subtitulo").value = created.name;
+  } catch (e) { showToast("Não foi possível criar o subtítulo: " + e.message, { error: true }); }
 }
 async function savePlanejado() {
   const name = document.getElementById("plan-nome").value.trim();
   const value = parseValorInput(document.getElementById("plan-valor").value);
-  const month = document.getElementById("plan-mes").value;
   const type = document.querySelector("#plan-tipo-seg .seg-btn.active")?.dataset.tipo || "saida";
+  const category = document.getElementById("plan-categoria").value || null;
+  const subtitle = category ? (document.getElementById("plan-subtitulo").value || null) : null;
   const errEl = document.getElementById("plan-error");
   errEl.classList.add("hidden");
-  if (!name || !value || value <= 0 || !month) {
-    errEl.textContent = "Preencha nome, valor e mês.";
+  const meses = Array.from(planModalSelected);
+  if (!name || !value || value <= 0 || !meses.length) {
+    errEl.textContent = "Preencha a descrição, o valor e escolha ao menos um mês.";
     errEl.classList.remove("hidden");
     return;
   }
   try {
-    if (editingPlanId) await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month } });
-    else await api("/planned", { method: "POST", body: { name, value, type, month } });
+    if (editingPlanId) {
+      await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: meses[0], category, subtitle } });
+    } else {
+      for (const month of meses) await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle } });
+    }
     editingPlanId = null;
     closeAllModals();
-    planMonth = month;
+    planMonth = meses[meses.length - 1];
     renderPlanejamento();
+    showToast(meses.length > 1 ? `${meses.length} itens criados.` : "Item salvo.");
   } catch (e) {
     errEl.textContent = e.message || "Não foi possível salvar.";
     errEl.classList.remove("hidden");
@@ -2488,6 +2578,22 @@ document.addEventListener("DOMContentLoaded", () => {
       const b = e.target.closest(".seg-btn"); if (!b) return;
       document.querySelectorAll("#plan-tipo-seg .seg-btn").forEach(x => x.classList.toggle("active", x === b));
     });
+    document.getElementById("plan-categoria").addEventListener("change", refreshSubtitleOptions);
+    document.getElementById("btn-add-subtitulo").addEventListener("click", (e) => { e.preventDefault(); addSubtituloInline(); });
+    document.getElementById("plan-mes-year-prev").addEventListener("click", () => { planModalYear = String(Number(planModalYear) - 1); renderPlanMesesGrid(); });
+    document.getElementById("plan-mes-year-next").addEventListener("click", () => { planModalYear = String(Number(planModalYear) + 1); renderPlanMesesGrid(); });
+    document.getElementById("plan-meses-grid").addEventListener("click", (e) => {
+      const b = e.target.closest(".month-check"); if (!b) return;
+      const ym = b.dataset.mes;
+      if (editingPlanId) {
+        // editando um item já existente: só um mês por vez (radio)
+        planModalSelected = new Set([ym]);
+      } else {
+        if (planModalSelected.has(ym)) planModalSelected.delete(ym); else planModalSelected.add(ym);
+      }
+      renderPlanMesesGrid();
+    });
+    document.getElementById("plan-valor").addEventListener("input", () => { if (!editingPlanId) renderPlanMesesGrid(); });
     document.getElementById("btn-salvar-planejado").addEventListener("click", (e) => withLoading(e.currentTarget, savePlanejado));
     document.getElementById("plan-list").addEventListener("click", (e) => {
       const row = e.target.closest("[data-plan-id]"); if (!row) return;

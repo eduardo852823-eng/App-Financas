@@ -206,8 +206,20 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, month TEXT,
     value REAL NOT NULL, created_at TEXT DEFAULT (datetime('now'))
   )`);
-  await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_goals_month ON category_goals(user_id, category, month) WHERE month IS NOT NULL");
+  await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS ux_goals_month ON category_goals(user_id, category, month) WHERE month IS NOT NULL`);
   await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_goals_fixed ON category_goals(user_id, category) WHERE month IS NULL");
+  // Planejamento v2: categoria + subtítulo no gasto futuro (ex: Compras > Mercado)
+  for (const stmt of [
+    "ALTER TABLE planned_items ADD COLUMN category TEXT",
+    "ALTER TABLE planned_items ADD COLUMN subtitle TEXT",
+  ]) {
+    try { await db.execute(stmt); } catch (e) { /* já existe */ }
+  }
+  // Subtítulos: organizam gastos dentro de uma categoria (ex: "Mercado" e "Shopping" dentro de "Compras")
+  await db.execute(`CREATE TABLE IF NOT EXISTS category_subtitles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, name TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')), UNIQUE (user_id, category, name)
+  )`);
 }
 
 /* ============================================================
@@ -957,58 +969,77 @@ app.get("/api/planned", auth, h(async (req, res) => {
   res.json(await all("SELECT * FROM planned_items WHERE user_id = ? ORDER BY month, created_at", [req.userId]));
 }));
 app.post("/api/planned", auth, h(async (req, res) => {
-  const { name, value, type, month } = req.body;
+  const { name, value, type, month, category, subtitle } = req.body;
   if (!name || typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "Dê um nome para o planejado." });
   const v = Number(value);
   if (!v || v <= 0) return res.status(400).json({ error: "Valor inválido." });
   if (!["entrada", "saida"].includes(type)) return res.status(400).json({ error: "Tipo inválido." });
   if (!/^\d{4}-\d{2}$/.test(month || "")) return res.status(400).json({ error: "Mês inválido." });
-  const r = await run("INSERT INTO planned_items (user_id, name, value, type, month) VALUES (?,?,?,?,?)", [req.userId, name.trim(), v, type, month]);
+  const r = await run(
+    "INSERT INTO planned_items (user_id, name, value, type, month, category, subtitle) VALUES (?,?,?,?,?,?,?)",
+    [req.userId, name.trim(), v, type, month, category || null, subtitle || null]
+  );
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [r.lastInsertRowid]));
 }));
 app.put("/api/planned/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });
-  if (item.paid) return res.status(400).json({ error: "Já foi marcado como pago. Desfaça o pagamento antes de editar." });
-  const { name, value, type, month } = req.body;
+  const { name, value, type, month, category, subtitle } = req.body;
   const v = Number(value);
   if (!name || !name.trim() || !v || v <= 0 || !["entrada", "saida"].includes(type) || !/^\d{4}-\d{2}$/.test(month || "")) {
     return res.status(400).json({ error: "Dados inválidos." });
   }
-  await run("UPDATE planned_items SET name = ?, value = ?, type = ?, month = ? WHERE id = ? AND user_id = ?", [name.trim(), v, type, month, item.id, req.userId]);
+  await run(
+    "UPDATE planned_items SET name = ?, value = ?, type = ?, month = ?, category = ?, subtitle = ? WHERE id = ? AND user_id = ?",
+    [name.trim(), v, type, month, category || null, subtitle || null, item.id, req.userId]
+  );
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
 }));
 app.delete("/api/planned/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });
-  if (item.tx_id) await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [item.tx_id, req.userId]);
   await run("DELETE FROM planned_items WHERE id = ? AND user_id = ?", [item.id, req.userId]);
   res.json({ ok: true });
 }));
-// Marca como pago: cria a transação de verdade (desconta do saldo) e a IA escolhe a categoria pelo nome.
+// Marca como pago: só um marcador visual para organização — não mexe no saldo real nem cria transação.
 app.post("/api/planned/:id/pay", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });
   if (item.paid) return res.status(400).json({ error: "Já está marcado como pago." });
-  const ctx = await buildUserCtx(req.userId);
-  const { cat, source } = classify(item.name, ctx);
-  const today = new Date().toISOString().slice(0, 10);
-  const date = item.month === today.slice(0, 7) ? today : `${item.month}-01`;
-  const value = item.type === "entrada" ? Math.abs(item.value) : -Math.abs(item.value);
-  const r = await run(
-    `INSERT INTO transactions (user_id, date, "desc", bank_id, value, type, category, category_source) VALUES (?,?,?,?,?,?,?,?)`,
-    [req.userId, date, item.name, "planejamento", value, item.type, cat, source || "model"]
-  );
-  await run("UPDATE planned_items SET paid = 1, tx_id = ? WHERE id = ?", [r.lastInsertRowid, item.id]);
+  await run("UPDATE planned_items SET paid = 1 WHERE id = ?", [item.id]);
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
 }));
-// Desfaz: apaga a transação criada e volta o item para "não pago"
+// Desfaz: só volta o marcador para "não pago"
 app.post("/api/planned/:id/unpay", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });
-  if (item.tx_id) await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [item.tx_id, req.userId]);
-  await run("UPDATE planned_items SET paid = 0, tx_id = NULL WHERE id = ?", [item.id]);
+  await run("UPDATE planned_items SET paid = 0 WHERE id = ?", [item.id]);
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
+}));
+
+// Subtítulos: organizam gastos futuros dentro de uma categoria (ex: "Mercado" e "Shopping" dentro de "Compras")
+app.get("/api/subtitles", auth, h(async (req, res) => {
+  res.json(await all("SELECT * FROM category_subtitles WHERE user_id = ? ORDER BY category, name", [req.userId]));
+}));
+app.post("/api/subtitles", auth, h(async (req, res) => {
+  const { category, name } = req.body;
+  if (!category || !name || !name.trim()) return res.status(400).json({ error: "Dê um nome para o subtítulo." });
+  try {
+    const r = await run("INSERT INTO category_subtitles (user_id, category, name) VALUES (?,?,?)", [req.userId, category, name.trim()]);
+    res.json(await get("SELECT * FROM category_subtitles WHERE id = ?", [r.lastInsertRowid]));
+  } catch (e) {
+    // já existe um subtítulo com esse nome nessa categoria — devolve ele
+    const existing = await get("SELECT * FROM category_subtitles WHERE user_id = ? AND category = ? AND name = ?", [req.userId, category, name.trim()]);
+    if (existing) return res.json(existing);
+    res.status(400).json({ error: "Não foi possível criar o subtítulo." });
+  }
+}));
+app.delete("/api/subtitles/:id", auth, h(async (req, res) => {
+  const sub = await get("SELECT * FROM category_subtitles WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!sub) return res.status(404).json({ error: "Não encontrado" });
+  await run("UPDATE planned_items SET subtitle = NULL WHERE user_id = ? AND category = ? AND subtitle = ?", [req.userId, sub.category, sub.name]);
+  await run("DELETE FROM category_subtitles WHERE id = ? AND user_id = ?", [sub.id, req.userId]);
+  res.json({ ok: true });
 }));
 
 app.get("/api/goals", auth, h(async (req, res) => {

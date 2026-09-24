@@ -1203,3 +1203,19 @@ body{overscroll-behavior-y:none;}
 .month-check:hover{border-color:var(--blue);}
 .month-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 6px 14px rgba(var(--accent-rgb),0.3);}
 .month-check-grid.hidden{display:none;}
+
+.hint-inline{font-size:11.5px; font-weight:600; color:var(--text-secondary);}
+.month-year-nav{display:flex; align-items:center; justify-content:center; gap:16px; margin-top:8px;}
+.month-year-label{font-weight:800; font-size:15px; min-width:52px; text-align:center;}
+.month-year-nav .month-arrow{border:none; background:var(--gray-100); width:32px; height:32px; border-radius:50%; font-size:18px; font-weight:700; color:var(--text-main); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.month-year-nav .month-arrow:hover{background:var(--blue); color:#fff;}
+.subtitle-add-row{display:flex; gap:8px; margin-top:6px;}
+.subtitle-add-row input{margin:0; flex:1;}
+.subtitle-add-row .btn-outline{white-space:nowrap; padding:0 14px;}
+
+.plan-cat-group{margin-bottom:14px;}
+.plan-cat-head{display:flex; align-items:center; gap:9px; padding:6px 2px; margin-bottom:6px;}
+.plan-cat-head .cat-icon{width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;}
+.plan-cat-name{font-weight:800; font-size:13.5px; flex:1;}
+.plan-cat-total{font-size:13.5px; font-variant-numeric:tabular-nums;}
+.plan-subtitle-head{display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; color:var(--text-secondary); padding:6px 4px 4px 14px;}

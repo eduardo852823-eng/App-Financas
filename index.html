@@ -390,17 +390,33 @@
         <button class="icon-btn" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
-        <label>Nome</label>
-        <input type="text" id="plan-nome" placeholder="Ex.: Pagamento pai" maxlength="80">
-        <label>Valor</label>
+        <label>Descrição</label>
+        <input type="text" id="plan-nome" placeholder="Ex.: Celular Motorola" maxlength="80">
+        <label>Valor <span id="plan-valor-hint" class="hint-inline"></span></label>
         <input type="text" inputmode="decimal" id="plan-valor" placeholder="0,00">
-        <label>Mês</label>
-        <input type="month" id="plan-mes">
         <label>Tipo</label>
         <div class="segmented" id="plan-tipo-seg">
           <button type="button" class="seg-btn active" data-tipo="saida">Gasto</button>
           <button type="button" class="seg-btn" data-tipo="entrada">Ganho</button>
         </div>
+        <label>Categoria</label>
+        <select id="plan-categoria"><option value="">Sem categoria</option></select>
+        <label id="plan-subtitulo-label" class="hidden">Subtítulo <span class="hint-inline">(opcional)</span></label>
+        <div class="hidden" id="plan-subtitulo-wrap">
+          <select id="plan-subtitulo"><option value="">Sem subtítulo</option></select>
+          <div class="subtitle-add-row">
+            <input type="text" id="plan-subtitulo-novo" placeholder="Criar novo subtítulo…" maxlength="40">
+            <button type="button" class="btn-outline" id="btn-add-subtitulo">+ Criar</button>
+          </div>
+        </div>
+        <label id="plan-mes-label">Mês em que esse gasto cai</label>
+        <div class="month-year-nav" id="plan-mes-year-nav">
+          <button type="button" class="month-arrow" id="plan-mes-year-prev">‹</button>
+          <div class="month-year-label" id="plan-mes-year-label">2026</div>
+          <button type="button" class="month-arrow" id="plan-mes-year-next">›</button>
+        </div>
+        <div class="month-check-grid" id="plan-meses-grid"></div>
+        <p class="hint-inline" id="plan-meses-hint" style="margin-top:6px"></p>
         <div class="plan-error hidden" id="plan-error"></div>
         <button class="btn btn-primary" id="btn-salvar-planejado" style="margin-top:16px">Salvar</button>
       </div>
