@@ -58,6 +58,20 @@ function bankLogo(cls, bankName, color, text) {
   if (!dom) return `<div class="${cls}" style="background:${color}">${ini}</div>`;
   return `<div class="${cls} has-logo" style="background:#fff"><img src="https://www.google.com/s2/favicons?domain=${dom}&sz=128" alt="" loading="lazy" onerror="this.parentElement.style.background='${color}';this.parentElement.classList.remove('has-logo');this.parentElement.textContent='${ini}'"></div>`;
 }
+// Ícones de interface em SVG (o app não usa emojis fora das categorias)
+const SVG_BASE = 'width="{s}" height="{s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+const ICON = (paths, s = 16) => `<svg ${SVG_BASE.replace(/\{s\}/g, s)}>${paths}</svg>`;
+const ICONS = {
+  pencil: (s) => ICON('<path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/>', s),
+  trash:  (s) => ICON('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>', s),
+  grip:   (s) => ICON('<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>', s),
+  eye:    (s) => ICON('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', s),
+  eyeOff: (s) => ICON('<path d="M3 3l18 18M10.6 5.1A10 10 0 0112 5c6.4 0 10 7 10 7a17 17 0 01-3.2 4M6.6 6.6A17 17 0 002 12s3.6 7 10 7a10 10 0 004.4-1"/>', s),
+  list:   (s) => ICON('<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>', s),
+  check:  (s) => ICON('<path d="M5 12l4 4 10-10"/>', s),
+  refresh:(s) => ICON('<path d="M20 11a8 8 0 00-14.5-4M4 5v4h4M4 13a8 8 0 0014.5 4M20 19v-4h-4"/>', s),
+  chevron:(s) => ICON('<path d="M9 6l6 6-6 6"/>', s)
+};
 function initials(name) { return esc(String(name || "").split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()); }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
@@ -203,8 +217,7 @@ async function refreshCategories() {
     state.customCategories = r.custom || [];
     state.categoryOverrides = r.overrides || {};
   } catch (e) {
-    state.customCategories = [];
-    state.categoryOverrides = {};
+    console.warn("categorias: mantendo dados anteriores —", e.message);
   }
 }
 async function refreshAll() {
@@ -274,12 +287,12 @@ function cardUsed(a) {
   return limit !== null && avail !== null ? limit - avail : num(a.balance);
 }
 function effectiveCategory(t) { return t.category; }
-// "chute" da IA (modelo treinado no seu histórico ou Claude): aparece com ✨ para você confirmar ou corrigir
+// "chute" da IA (modelo treinado no seu histórico ou Claude): aparece com o selo "IA" para você confirmar ou corrigir
 function isGuess(t) { return t.category_source === "model" || t.category_source === "llm"; }
 function needsReview(t) { return !Number(t.category_manual) && (t.category === "nao_identificada" || isGuess(t)); }
 function sourceLabel(t) {
   if (Number(t.category_manual) || t.category_source === "manual") return "Você";
-  return { learned: "Aprendido com suas correções", rule: "Regra automática", pluggy: "Categoria do banco", model: "IA (seu histórico) ✨", llm: "IA (Claude) ✨" }[t.category_source] || (t.category === "nao_identificada" ? "—" : "Automática");
+  return { learned: "Aprendido com suas correções", rule: "Regra automática", pluggy: "Categoria do banco", model: "IA (seu histórico)", llm: "IA (Claude)" }[t.category_source] || (t.category === "nao_identificada" ? "—" : "Automática");
 }
 
 /* ============================================================
@@ -344,7 +357,7 @@ const NAV_DEFS = {
   relatorios:   { label: "Relatórios",    svg: '<path d="M4 19V9M12 19V5M20 19v-7"/>' },
   investimentos:{ label: "Investimentos", svg: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>' },
   creditos:     { label: "Créditos",      svg: '<path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0112 6a5.2 5.2 0 019.3 6c-2.3 4.4-9.3 9-9.3 9z"/>' },
-  bancos:       { label: "Meus bancos",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
+  bancos:       { label: "Instituições",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
 };
 const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","relatorios","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
 function getNavCfg() {
@@ -380,10 +393,10 @@ function renderNavEditor() {
   el.innerHTML = c.order.map((id, i) => {
     const off = c.hidden.includes(id);
     return (i === firstOff ? `<li class="nav-sep">Escondidas</li>` : "") + `<li class="nav-edit-item${off ? " off" : ""}" data-id="${id}">
-      <span class="nav-handle" title="Arraste para mudar a ordem">☰</span>
+      <span class="nav-handle" title="Arraste para mudar a ordem">${ICONS.grip(18)}</span>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${NAV_DEFS[id].svg}</svg>
       <span class="nav-edit-name">${NAV_DEFS[id].label}</span>
-      <button type="button" class="nav-eye" data-toggle="${id}" aria-label="${off ? "Mostrar" : "Esconder"} ${NAV_DEFS[id].label}">${off ? "🙈" : "👁"}</button>
+      <button type="button" class="nav-eye" data-toggle="${id}" aria-label="${off ? "Mostrar" : "Esconder"} ${NAV_DEFS[id].label}">${off ? ICONS.eyeOff(18) : ICONS.eye(18)}</button>
     </li>`;
   }).join("");
 }
@@ -477,7 +490,7 @@ async function toggleTheme() {
     try { await api("/me/preferences", { method: "PUT", body: { theme: next, currency: state.preferences.currency } }); }
     catch (e) { console.warn("não foi possível salvar a preferência de tema", e); }
   }
-  if (currentScreen === "inicio" || currentScreen === "relatorios") renderScreen(currentScreen);
+  if (["inicio", "relatorios", "categorias"].includes(currentScreen)) renderScreen(currentScreen);
 }
 
 /* ============================================================
@@ -495,6 +508,7 @@ function showApp() {
   setTimeout(checkReviewPrompt, 700);
   setTimeout(() => autoSyncAll(), 2500);
 }
+const BRAND_HTML = '<span class="brand"><img class="brand-mark" src="icon-192.png" alt="" width="26" height="26"><span class="brand-name">Fluxo</span></span>';
 function navigateTo(screen, { refresh = true } = {}) {
   const remember = screen === "categoria-detalhe" ? "categorias" : screen;
   if (NAV_DEFS[remember]) localStorage.setItem("lastScreen", remember); // ao reabrir o app volta para onde você parou
@@ -508,7 +522,8 @@ function navigateTo(screen, { refresh = true } = {}) {
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
   const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
-  document.getElementById("topbar-title").textContent = titles[screen] || "";
+  const topTitle = document.getElementById("topbar-title");
+  if (screen === "inicio") topTitle.innerHTML = BRAND_HTML; else topTitle.textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
   if (backBtn) backBtn.classList.toggle("hidden", screen !== "entradas-saidas" && screen !== "categoria-detalhe");
   renderScreen(screen);
@@ -586,7 +601,7 @@ function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) 
     if (banco && banco !== "all" && t.bank_id !== banco) return false;
     if (tipo && tipo !== "all" && t.type !== tipo) return false;
     if (categoria && categoria !== "all" && effectiveCategory(t) !== categoria) return false;
-    if (search && !t.desc.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !String(t.desc || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 }
@@ -646,13 +661,13 @@ function renderDashboard() {
     const val = typeof i.balance === "number" ? i.balance : state.transactions.filter(t => t.bank_id === i.id).reduce((s,t) => s + t.value, 0);
     return `<div class="bank-chip">
       ${bankLogo("bank-icon", i.logoName || i.name, i.color, i.name)}
+      <div class="bank-chip-name" title="${esc(i.name)}">${esc(i.name)}</div>
       <div class="bank-amount">${fmtBRL(val)}</div>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${esc(i.name)}</div>
     </div>`;
   }).join("") + `<button type="button" class="bank-chip add-bank-chip" data-nav="bancos">
       <div class="bank-icon add-icon">+</div>
-      <div class="bank-amount">Adicionar</div>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">banco</div>
+      <div class="bank-chip-name">Adicionar</div>
+      <div class="bank-amount bank-amount-sub">novo banco</div>
     </button>`;
 
   renderCards();
@@ -744,7 +759,7 @@ function kvRow(label, valueHtml) {
 }
 const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
 
-const TRASH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>';
+const TRASH_SVG = ICONS.trash(16);
 function cardHtml(a) {
   const d = a.data || {};
   const c = d.creditData || {};
@@ -756,15 +771,22 @@ function cardHtml(a) {
   const bill = bills[0];
   const spent = -state.transactions.filter(t => t.bank_id === a.account_id).reduce((s, t) => s + t.value, 0);
   const sub = [c.brand, c.level].filter(Boolean).map(esc).join(" ") + (d.number ? ` • final ${esc(d.number)}` : "");
+  const rows = [
+    bill ? kvRow("Fatura", money(bill.totalAmount)) : "",
+    bill ? kvRow("Vencimento", esc(fmtDate(bill.dueDate))) : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate))),
+    kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate))),
+    kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment)),
+    kvRow("Compras registradas", money(spent))
+  ].join("");
 
   return `<div class="credit-card-item">
     <div class="credit-card-top" style="background:${color}">
       <div class="credit-card-name">${esc(title)}</div>
       <div class="credit-card-sub">${sub || "Cartão de crédito"}</div>
-      <button type="button" class="cc-del" data-card-del="${esc(a.account_id)}" title="Excluir cartão" aria-label="Excluir cartão ${esc(title)}">${TRASH_SVG}</button>
     </div>
     <div class="credit-card-body">
-      ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>` : ""}
+      ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+        <div class="limit-used">${pct.toFixed(0)}% do limite usado</div>` : ""}
       <div class="limit-highlight-row">
         <div class="limit-highlight">
           <span class="limit-highlight-label">Limite total</span>
@@ -775,14 +797,9 @@ function cardHtml(a) {
           <span class="limit-highlight-value">${money(avail) || "—"}</span>
         </div>
       </div>
-      ${bill
-        ? kvRow(`Fatura (vence ${fmtDate(bill.dueDate) || "—"})`, money(bill.totalAmount))
-        : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate)))}
-      ${kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))}
-      ${kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment))}
-      ${kvRow("Compras registradas nas transações", money(spent))}
+      ${rows ? `<div class="kv-grid">${rows}</div>` : ""}
       <div class="cc-actions">
-        <button class="btn-connect card-tx-btn" data-card-tx="${esc(a.account_id)}">Ver transações</button>
+        <button class="btn-connect card-tx-btn" type="button" data-card-tx="${esc(a.account_id)}">Ver transações</button>
         <button class="btn-connect danger" type="button" data-card-del="${esc(a.account_id)}">Excluir cartão</button>
       </div>
     </div>
@@ -826,6 +843,8 @@ function renderCards() {
   const cards = state.accounts.filter(a => a.type === "CREDIT");
   wrap.classList.toggle("hidden", !cards.length);
   list.innerHTML = cards.map(cardHtml).join("");
+  const cnt = document.getElementById("cards-count");
+  if (cnt) cnt.textContent = cards.length ? `${cards.length} ${cards.length === 1 ? "cartão" : "cartões"}` : "";
 }
 
 function themeColor(varName) {
@@ -884,8 +903,8 @@ function renderLegend(elId, byCat, total) {
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="legend-row" data-cat="${cat}">
-      <div class="legend-left"><span class="legend-dot" style="background:${info.color}"></span>${info.icon} ${info.name}</div>
+    return `<div class="legend-row" data-cat="${esc(cat)}">
+      <div class="legend-left"><span class="legend-dot" style="background:${info.color}"></span>${info.icon} ${esc(info.name)}</div>
       <div><span class="legend-pct">${pct}%</span> &nbsp; ${fmtBRL(val)}</div>
     </div>`;
   }).join("");
@@ -936,11 +955,6 @@ function invBalanceAgo(invId, days = 30) {
   if (first && first.day < today) return { balance: first.balance, day: first.day, since: true };
   return null;
 }
-function deltaHtml(now, ago) {
-  if (!ago) return `<span class="inv-muted">Comparação começa a valer a partir de hoje</span>`;
-  const d = now - ago.balance, cls = d >= 0 ? "pos" : "neg";
-  return `<span class="inv-delta ${cls}">${d >= 0 ? "▲ +" : "▼ "}${fmtBRL(d)}</span> <span class="inv-muted">${ago.since ? "desde" : "vs"} ${fmtDate(ago.day)} (${fmtBRL(ago.balance)})</span>`;
-}
 async function editInvDate(invId, current) {
   const shown = current ? current.split("-").reverse().join("/") : "";
   const ans = prompt("Data em que você aplicou (dd/mm/aaaa):", shown);
@@ -958,7 +972,7 @@ function renderInvestimentos() {
   document.getElementById("inv-total").textContent = fmtBRL(total);
   if (!invs.length) {
     document.getElementById("inv-change").textContent = "Nenhum investimento encontrado";
-    list.innerHTML = `<div class="empty-state">Nenhum banco conectado tem investimentos. Se você investe e não aparece, toque em Sincronizar em "Meus bancos".</div>`;
+    list.innerHTML = `<div class="empty-state">Nenhum banco conectado tem investimentos. Se você investe e não aparece, toque em Sincronizar em "Minhas instituições".</div>`;
     return;
   }
   const yieldOf = (v) => (v.amount_original != null ? v.balance - v.amount_original : (v.profit != null ? v.profit : null));
@@ -1007,12 +1021,15 @@ function populateTxFilters() {
 
   const catSel = document.getElementById("tx-filter-categoria");
   catSel.innerHTML = `<option value="all">Todas categorias</option>` +
-    allCategories().map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join("");
+    allCategories().map(c => `<option value="${esc(c.id)}">${c.icon} ${esc(c.name)}</option>`).join("");
   catSel.value = txFilterCategoria;
 }
 
 function renderTransacoes() {
   populateTxFilters();
+  // o botão de filtros fica destacado quando há filtro ligado (antes não dava para saber por que a lista estava menor)
+  const filtrando = txFilterPeriodo !== "all" || txFilterBanco !== "all" || txFilterTipo !== "all" || txFilterCategoria !== "all";
+  document.getElementById("btn-toggle-filtros")?.classList.toggle("active", filtrando);
   renderTxReviewBanner();
   const allTxs = filterTx(state.transactions, { range: periodRange(txFilterPeriodo), banco: txFilterBanco, tipo: txFilterTipo, categoria: txFilterCategoria, search: txSearch })
     .sort((a,b) => b.date.localeCompare(a.date));
@@ -1050,7 +1067,7 @@ function txRowHtml(t) {
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
           <span class="tx-bank-name">${esc(info.name)}</span>
-          <span class="tx-cat-chip"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${cat.name}${isGuess(t) ? " ✨" : ""}</span>
+          <span class="tx-cat-chip"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${esc(cat.name)}${isGuess(t) ? ' <span class="ai-badge">IA</span>' : ""}</span>
         </div>
       </div>
     </div>
@@ -1068,7 +1085,7 @@ function openTxDetalhe(id) {
   document.getElementById("detalhe-body").innerHTML = `
     <div class="detalhe-value ${isPos ? "pos" : "neg"}">${isPos ? "+ " : "- "}${fmtBRL(Math.abs(t.value))}</div>
     <div style="font-weight:700;font-size:15px">${esc(t.desc)}</div>
-    <div class="detalhe-cat-badge">${cat.icon} ${cat.name}</div>
+    <div class="detalhe-cat-badge">${cat.icon} ${esc(cat.name)}</div>
     <div class="detalhe-info-row"><span>Categoria definida por</span><span>${sourceLabel(t)}</span></div>
     <div class="detalhe-info-row"><span>Banco</span><span>${esc(info.name)}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
@@ -1095,15 +1112,15 @@ function openCategoriaModal(txId) {
   const grid = document.getElementById("cat-grid");
   const cats = allCategories().filter(c => c.id !== "salario" || (t && t.type === "entrada"));
   grid.innerHTML = cats.map(c => `
-    <div class="cat-grid-item ${c.id === pendingCatSelected ? "selected" : ""}" data-cat-id="${c.id}">
+    <div class="cat-grid-item ${c.id === pendingCatSelected ? "selected" : ""}" data-cat-id="${esc(c.id)}">
       ${c.id !== "outros" && c.id !== "nao_identificada" ? `
         <div class="cat-grid-actions">
-          <button type="button" class="cat-mini-btn" data-edit-cat="${c.id}" title="Editar categoria">✎</button>
-          <button type="button" class="cat-mini-btn cat-mini-btn-danger" data-del-cat="${c.id}" title="Excluir categoria">🗑</button>
+          <button type="button" class="cat-mini-btn" data-edit-cat="${esc(c.id)}" title="Editar categoria" aria-label="Editar categoria">${ICONS.pencil(11)}</button>
+          <button type="button" class="cat-mini-btn cat-mini-btn-danger" data-del-cat="${esc(c.id)}" title="Excluir categoria" aria-label="Excluir categoria">${ICONS.trash(11)}</button>
         </div>
       ` : ""}
       <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
-      ${c.name}
+      ${esc(c.name)}
     </div>
   `).join("") + `
     <div class="cat-grid-item cat-grid-add" id="cat-grid-add-btn">
@@ -1148,8 +1165,8 @@ function renderTxReviewBanner() {
   const chutes = state.transactions.filter(t => isGuess(t) && !Number(t.category_manual)).length;
   if (!sem && !chutes) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   const partes = [];
-  if (sem) partes.push(`❓ <b>${sem}</b> sem categoria`);
-  if (chutes) partes.push(`✨ <b>${chutes}</b> sugerida${chutes === 1 ? "" : "s"} pela IA`);
+  if (sem) partes.push(`<b>${sem}</b> sem categoria`);
+  if (chutes) partes.push(`<b>${chutes}</b> sugerida${chutes === 1 ? "" : "s"} pela IA`);
   el.classList.remove("hidden");
   el.innerHTML = `<span>${partes.join(" • ")}</span><button type="button" id="btn-open-revisao">Revisar</button>`;
 }
@@ -1157,7 +1174,7 @@ function openReviewIntro(days, novas, semCat) {
   document.getElementById("revisao-title").textContent = "Vamos revisar?";
   document.getElementById("revisao-body").innerHTML = `
     <div class="rev-intro">
-      <div class="rev-emoji">👋</div>
+      <div class="rev-icon">${ICONS.list(26)}</div>
       <strong style="font-size:16px;color:var(--navy)">Faz ${days} dias que você não entra por aqui</strong>
       <p>Chegaram <strong>${novas}</strong> transaç${novas === 1 ? "ão nova" : "ões novas"} nesse tempo${semCat ? ` (${semCat} sem categoria)` : ""}.<br>Vamos revisar as categorias dessas transações?</p>
     </div>
@@ -1193,7 +1210,7 @@ function renderReviewStep() {
   if (review.pos >= review.ids.length) {
     body.innerHTML = `
       <div class="rev-intro">
-        <div class="rev-emoji">🎉</div>
+        <div class="rev-icon done">${ICONS.check(26)}</div>
         <strong style="font-size:16px;color:var(--navy)">Revisão concluída!</strong>
         <p>${review.done ? `Você categorizou ${review.done} transaç${review.done === 1 ? "ão" : "ões"}.` : "Nada alterado."}${review.note ? `<br>${review.note}` : ""}</p>
       </div>
@@ -1205,9 +1222,9 @@ function renderReviewStep() {
   const cur = catInfo(t.category);
   const isPos = t.value >= 0;
   const total = review.ids.length;
-  const cats = CATEGORIES.filter(c => c.id !== "nao_identificada" && (c.id !== "salario" || t.type === "entrada"));
+  const cats = allCategories().filter(c => c.id !== "nao_identificada" && (c.id !== "salario" || t.type === "entrada"));
   body.innerHTML = `
-    <div class="rev-progress"><span>${review.pos + 1} de ${total}</span><span>${cur.icon} ${cur.name}${isGuess(t) ? " ✨ sugerida" : ""}</span></div>
+    <div class="rev-progress"><span>${review.pos + 1} de ${total}</span><span>${cur.icon} ${esc(cur.name)}${isGuess(t) ? " · sugerida pela IA" : ""}</span></div>
     <div class="rev-bar"><i style="width:${Math.round((review.pos / total) * 100)}%"></i></div>
     ${review.note ? `<div class="rev-note">${esc(review.note)}</div>` : ""}
     <div class="rev-tx">
@@ -1216,7 +1233,7 @@ function renderReviewStep() {
       <div class="rev-meta">${fmtDate(t.date) || ""} • ${esc(info.name)}</div>
     </div>
     <div class="cat-grid" id="rev-grid">
-      ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${c.id}"><div class="cat-icon" style="background:${c.color}">${c.icon}</div>${c.name}</div>`).join("")}
+      ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${esc(c.id)}"><div class="cat-icon" style="background:${c.color}">${c.icon}</div>${esc(c.name)}</div>`).join("")}
       <div class="cat-grid-item cat-grid-add" id="rev-grid-add-btn">
         <div class="cat-icon cat-icon-add">+</div>
         Nova categoria
@@ -1225,7 +1242,7 @@ function renderReviewStep() {
     <div class="rev-actions">
       ${t.category === "nao_identificada"
         ? `<button class="btn btn-outline" type="button" data-rev="skip">Pular</button>`
-        : `<button class="btn btn-primary" type="button" data-rev="confirm">✓ Está certo</button>`}
+        : `<button class="btn btn-primary" type="button" data-rev="confirm">Está certo</button>`}
     </div>`;
 }
 async function reviewPick(catId) {
@@ -1237,7 +1254,7 @@ async function reviewPick(catId) {
     if (catId !== t.category || !Number(t.category_manual)) {
       const r = await api(`/transactions/${id}/category`, { method: "PUT", body: { category: catId } });
       review.done++;
-      review.note = r && r.applied ? `✓ Salvo — apliquei em mais ${r.applied} parecida${r.applied === 1 ? "" : "s"}` : "✓ Salvo";
+      review.note = r && r.applied ? `Salvo. Apliquei em mais ${r.applied} parecida${r.applied === 1 ? "" : "s"}.` : "Salvo.";
       await refreshTransactions();
       renderScreen(currentScreen);
     }
@@ -1292,11 +1309,11 @@ function renderCategorias() {
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
     const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="cat-row" data-cat="${cat}">
+    return `<div class="cat-row" data-cat="${esc(cat)}">
       <div class="cat-row-left">
         <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
         <div>
-          <div class="cat-name">${info.name}</div>
+          <div class="cat-name">${esc(info.name)}</div>
           <div class="cat-pct">${pct}%</div>
         </div>
       </div>
@@ -1369,7 +1386,7 @@ async function deleteCategoria(id) {
     if (pendingCatTxId != null) openCategoriaModal(pendingCatTxId);
     else renderScreen(currentScreen);
   } catch (e) {
-    alert(e.message || "Não foi possível excluir a categoria.");
+    showToast(e.message || "Não foi possível excluir a categoria.", { error: true });
   }
 }
 
@@ -1390,11 +1407,16 @@ function populateRelatorioFilters() {
   mesSel.value = prevMes || String(new Date().getMonth());
 
   const bancoSel = document.getElementById("rel-banco");
-  const connected = connectedBanks();
-  bancoSel.innerHTML = `<option value="all">Todos</option>` + bankAccountsOnly().map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
+  const prevBanco = bancoSel.value;
+  const bancos = bankAccountsOnly();
+  bancoSel.innerHTML = `<option value="all">Todos</option>` + bancos.map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("");
+  bancoSel.value = bancos.some(i => i.id === prevBanco) ? prevBanco : "all";
 
   const catSel = document.getElementById("rel-categoria");
-  catSel.innerHTML = `<option value="all">Todas</option>` + CATEGORIES.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+  const prevCat = catSel.value;
+  const cats = allCategories();
+  catSel.innerHTML = `<option value="all">Todas</option>` + cats.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  catSel.value = cats.some(c => c.id === prevCat) ? prevCat : "all";
 
   const comp1 = document.getElementById("comp-mes1"), comp2 = document.getElementById("comp-mes2");
   const opts = months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("");
@@ -1496,7 +1518,7 @@ function renderComparacao() {
   if (m1 === m2) { el.innerHTML = `<div class="empty-state">Escolha dois meses diferentes para comparar.</div>`; return; }
   el.innerHTML = v1 === 0 && v2 === 0
     ? `<div class="empty-state">Sem dados nesses dois meses.</div>`
-    : `<div class="comp-diff ${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "↑" : "↓"} ${fmtBRL(Math.abs(diff))} ${diff >= 0 ? "a mais" : "a menos"}</div>
+    : `<div class="comp-diff ${diff >= 0 ? "up" : "down"}">${fmtBRL(Math.abs(diff))} ${diff >= 0 ? "a mais" : "a menos"}</div>
        <p class="rel-frase">Em ${monthLabel(m2)} você ${verbo} ${fmtBRL(v2)}. Em ${monthLabel(m1)} foram ${fmtBRL(v1)}${v1 ? ` (${Math.abs(pct)}% ${diff >= 0 ? "a mais" : "a menos"})` : ""}.</p>`;
 }
 
@@ -1552,6 +1574,10 @@ async function afterLoginSuccess(token) {
 async function logoutUser() {
   clearToken();
   state.user = null; state.transactions = []; state.accounts = []; state.pluggyItems = [];
+  state.investments = []; state.investHistory = []; state.customCategories = []; state.categoryOverrides = {};
+  dashFilterPeriodo = "all"; dashFilterBanco = "all"; txSearch = ""; txFilterPeriodo = "all"; txFilterBanco = "all";
+  txFilterTipo = "all"; txFilterCategoria = "all"; txVisibleCount = TX_PAGE_SIZE; catDetalhe = null; currentScreen = "inicio";
+  localStorage.removeItem("lastScreen");
   closeAllModals();
   showLogin();
 }
@@ -1700,7 +1726,7 @@ async function startPluggyConnect() {
   closeAllModals();
 
   if (typeof PluggyConnect === "undefined") {
-    alert("O widget do Pluggy ainda não carregou. Verifique sua conexão e tente novamente.");
+    showToast("O widget do Pluggy ainda não carregou. Verifique sua conexão e tente novamente.", { error: true });
     return;
   }
 
@@ -1733,7 +1759,7 @@ async function startPluggyConnect() {
             }
             await refreshAfterSync();
             if (!r.contasEncontradas) {
-              showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Meus bancos daqui a um minuto se elas não aparecerem sozinhas.");
+              showToast("Conectado! O banco ainda está processando as contas — toque em \"Sincronizar\" em Minhas instituições daqui a um minuto se elas não aparecerem sozinhas.");
             } else {
               showToast(`Conectado! ${r.contasEncontradas} conta${r.contasEncontradas === 1 ? "" : "s"} encontrada${r.contasEncontradas === 1 ? "" : "s"}.`);
             }
@@ -1745,12 +1771,12 @@ async function startPluggyConnect() {
         },
         onError: (error) => {
           console.error("Erro no Pluggy Connect:", error);
-          alert("Não foi possível concluir a conexão com o banco.");
+          showToast("Não foi possível concluir a conexão com o banco.", { error: true });
         }
       });
       pluggyConnect.init();
     } catch (e) {
-      alert("Erro ao iniciar conexão com o Pluggy: " + e.message);
+      showToast("Erro ao iniciar conexão com o Pluggy: " + e.message, { error: true });
     }
   });
 }
@@ -1818,7 +1844,7 @@ async function removePluggyItem(id) {
     await Promise.all([refreshPluggyItems(), refreshTransactions(), refreshAccounts()]);
     renderScreen(currentScreen);
   } catch (e) {
-    alert("Erro ao remover: " + e.message);
+    showToast("Erro ao remover: " + e.message, { error: true });
   }
 }
 
@@ -1879,7 +1905,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(() => {
     document.getElementById("btn-profile").addEventListener("click", () => openModal("modal-perfil"));
     document.getElementById("btn-logout").addEventListener("click", logoutUser);
-    document.getElementById("btn-ajuda").addEventListener("click", () => alert("Precisa de ajuda? Fale com o suporte pelo e-mail eduardo8528233@gmail.com"));
+    document.getElementById("btn-ajuda").addEventListener("click", () => showToast("Precisa de ajuda? Fale com o suporte pelo e-mail eduardo8528233@gmail.com", { ms: 9000 }));
     document.getElementById("btn-configuracoes").addEventListener("click", openConfiguracoes);
   }, "perfil");
 
@@ -2074,15 +2100,26 @@ document.addEventListener("DOMContentLoaded", () => {
   wire(async () => {
     const token = getToken();
     if (!token) { showLogin(); return; }
-    try {
+    const open = async () => {
       await refreshAll();
       applyTheme(state.preferences.theme || "light");
       localStorage.setItem(THEME_CACHE_KEY, state.preferences.theme || "light");
       applyUserToUI(state.user);
       showApp();
+    };
+    try {
+      await open();
     } catch (e) {
-      clearToken();
-      showLogin();
+      // sessão vencida (401): api() já limpou o token e mostrou o login. Qualquer outro erro é
+      // rede ou servidor acordando: tenta mais uma vez e, se falhar, mantém a sessão salva.
+      if (!getToken()) return;
+      await sleep(3000);
+      try { await open(); }
+      catch (e2) {
+        if (!getToken()) return;
+        showLogin();
+        showToast("Não consegui falar com o servidor agora. Sua sessão foi mantida: recarregue a página em instantes.", { error: true, ms: 9000 });
+      }
     }
   }, "boot");
 

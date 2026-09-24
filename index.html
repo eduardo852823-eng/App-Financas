@@ -100,6 +100,7 @@
         <section class="hero" aria-label="Saldo total">
           <div class="hero-top">
             <div class="hero-hello">
+              <p class="hero-brand">Fluxo</p>
               <p class="greeting" id="greeting-text">Olá!</p>
               <p class="hero-sub" id="balance-change">—</p>
             </div>
@@ -133,12 +134,12 @@
 
         <div class="section-head">
           <h3>Seus bancos</h3>
-          <a href="#" class="link-small" data-nav="bancos">Ver todos ›</a>
+          <a href="#" class="link-small" data-nav="bancos">Ver todos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
         </div>
         <div class="banks-scroll" id="banks-scroll"></div>
 
         <div class="cards-wrap hidden" id="cards-wrap">
-          <div class="section-head"><h3>Seus cartões</h3></div>
+          <div class="section-head"><h3>Seus cartões</h3><span class="section-count" id="cards-count"></span></div>
           <div id="cards-list"></div>
         </div>
 
@@ -158,7 +159,7 @@
           <p class="subtext" style="margin-bottom:12px">Conecte uma conta bancária de verdade via Pluggy. Você pode conectar contas de mais de um CPF.</p>
           <div id="pluggy-items-list"></div>
           <button class="btn btn-primary btn-add-inst" id="btn-pluggy-connect">+ Conectar banco real (Pluggy)</button>
-          <button class="btn btn-outline" id="btn-sync-all" style="margin-top:10px">↻ Sincronizar todos os bancos</button>
+          <button class="btn btn-outline" id="btn-sync-all" style="margin-top:10px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 00-14.5-4M4 5v4h4M4 13a8 8 0 0014.5 4M20 19v-4h-4"/></svg>Sincronizar todos os bancos</button>
         </div>
 
       </section>
@@ -215,7 +216,7 @@
         <div class="section-head"><h3>Como usar o Fluxo</h3></div>
         <div class="card howto">
           <ol>
-            <li><b>Conecte seus bancos</b> em "Meus bancos" (menu do perfil). O app só lê os dados, nunca guarda sua senha.</li>
+            <li><b>Conecte seus bancos</b> em "Minhas instituições" (menu do perfil). O app só lê os dados, nunca guarda sua senha.</li>
             <li><b>Início:</b> veja o saldo, quanto entrou e saiu, e seus cartões.</li>
             <li><b>Transações:</b> toque numa transação para trocar a categoria.</li>
             <li><b>Categorias:</b> toque numa categoria para ver só os gastos ou ganhos dela.</li>
@@ -442,7 +443,7 @@
         </select>
         <label>Cor do app</label>
         <div class="accent-picker" id="accent-picker"></div>
-        <label>Abas de baixo <span class="cfg-hint">arraste ☰ para mudar a ordem • toque no olho para esconder</span></label>
+        <label>Abas de baixo <span class="cfg-hint">arraste pela alça para mudar a ordem • toque no olho para esconder</span></label>
         <ul class="nav-editor" id="nav-editor"></ul>
         <button type="button" class="btn-link-small" id="btn-nav-reset">Restaurar padrão</button>
         <label class="checkbox-row" style="margin-top:14px">
