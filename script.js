@@ -324,7 +324,7 @@ function applyAccent() {
   const [base, deep1, mid, deep, rgb] = ACCENTS[currentAccent()][dark ? "dark" : "light"];
   const st = document.documentElement.style;
   st.setProperty("--blue", base); st.setProperty("--blue-dark", deep1);
-  const out = { vermelho: dark ? "#FBBF24" : "#D97706", rosa: dark ? "#F87171" : "#E5484D" }[currentAccent()] || (dark ? "#FB7185" : "#E5484D");
+  const out = { vermelho: dark ? "#F43F5E" : "#BE123C", rosa: dark ? "#F87171" : "#E5484D" }[currentAccent()] || (dark ? "#FB7185" : "#E5484D");
   st.setProperty("--out", out);
   st.setProperty("--accent-mid", mid); st.setProperty("--accent-deep", deep); st.setProperty("--accent-rgb", rgb);
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ACCENTS[currentAccent()].light[0]);
@@ -997,7 +997,9 @@ function populateTxFilters() {
   periodoSel.innerHTML = TX_PERIODS.map(p => `<option value="${p.id}">${p.label}</option>`).join("");
   periodoSel.value = txFilterPeriodo;
   const bancoSel = document.getElementById("tx-filter-banco");
-  const connected = connectedBanks();
+  // cartão não aparece como opção do filtro; só fica na lista enquanto o filtro dele
+  // está ativo (quando se abre "Ver transações do cartão"), para o select não ficar vazio
+  const connected = connectedBanks().filter(i => i.type !== "CREDIT" || i.id === txFilterBanco);
   bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
     connected.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
   bancoSel.value = txFilterBanco;

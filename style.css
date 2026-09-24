@@ -954,3 +954,67 @@ body{overscroll-behavior-y:none;}
 /* nomes de conta/cartão não ficam mais cortados ("Cartão Ca…") na tela Meus bancos */
 .inst-acc-name{white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; line-height:1.25;}
 .inst-acc-value{flex:none;}
+
+
+/* ============================================================
+   v5 — TODAS AS TELAS NO MESMO VISUAL DA INÍCIO (só cores e cards)
+   Fica no fim para valer sobre as regras antigas; usa variáveis
+   do tema, então acompanha a cor escolhida e o modo claro/escuro.
+   ============================================================ */
+
+/* ícones das caixinhas seguem a cor do tema (antes eram vermelho/verde fixos) */
+.flow-tile.in .flow-ico{background:color-mix(in srgb, var(--green) 16%, transparent);}
+.flow-tile.out .flow-ico{background:color-mix(in srgb, var(--out) 16%, transparent);}
+
+/* Total investido: mesmo bloco tingido do saldo da Início */
+.screen-investimentos .card-balance{
+  background:color-mix(in srgb, var(--blue) 6%, var(--card-bg)); color:var(--text-main);
+  border:1px solid rgba(var(--accent-rgb), .2); border-radius:26px; padding:20px; box-shadow:var(--shadow);
+}
+[data-theme="dark"] .screen-investimentos .card-balance{
+  background:color-mix(in srgb, var(--blue) 10%, var(--card-bg)); border-color:rgba(var(--accent-rgb), .28);
+}
+.screen-investimentos .card-balance::before{display:none;}
+.screen-investimentos .card-label{color:var(--text-secondary); opacity:1;}
+.screen-investimentos .card-balance-value{
+  font-size:clamp(34px, 10.5vw, 46px); letter-spacing:-1.4px; line-height:1.05; text-shadow:none; color:var(--text-main);
+  font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.screen-investimentos .card-balance-sub{color:var(--text-secondary); opacity:1;}
+.screen-investimentos .card-balance .inv-muted{color:var(--text-secondary);}
+.screen-investimentos .card-balance .inv-delta.pos{color:var(--green);}
+.screen-investimentos .card-balance .inv-delta.neg{color:var(--out);}
+
+/* Relatórios: "Sobrou/Faltou" com o mesmo acabamento das caixinhas */
+.screen-relatorios .flow-tiles{margin-bottom:12px;}
+.screen-relatorios .card-result{
+  border-radius:20px; padding:14px 16px; background:var(--card-bg);
+  border:1px solid rgba(128,128,128,.16); box-shadow:none;
+}
+.screen-relatorios .card-result .mini-label{font-size:12px; font-weight:600; color:var(--text-secondary);}
+.screen-relatorios .card-result .mini-value{font-size:18px; font-weight:800; font-variant-numeric:tabular-nums;}
+
+/* listas e blocos de todas as telas: mesma borda suave e raio das caixinhas da Início */
+.tx-row, .cat-row, .bank-row{
+  border:1px solid rgba(128,128,128,.16); border-radius:18px; box-shadow:0 1px 2px rgba(15,30,56,.04);
+}
+.card, .inst-conn, .inv-bank, .catdet-head, .credits-card, .howto{
+  border:1px solid rgba(128,128,128,.16); border-radius:20px;
+}
+.card-balance, .hero{border-radius:26px;}
+.inst-acc{border:1px solid rgba(128,128,128,.14); box-shadow:none; border-radius:14px;}
+.search-box{border:1px solid rgba(128,128,128,.24); border-radius:16px; box-shadow:none;}
+.btn-filter-toggle{border:1px solid rgba(128,128,128,.24); box-shadow:none;}
+.segmented{border:1px solid rgba(128,128,128,.16);}
+.filters-grid select, #comp-mes1, #comp-mes2, #comp-tipo{
+  border:1px solid rgba(128,128,128,.24); border-radius:14px; color:var(--text-main); background-color:var(--card-bg);
+}
+.review-banner{border-style:solid; border-color:rgba(128,128,128,.16); border-radius:16px;}
+.tx-row:hover, .cat-row:hover, .bank-row:hover{border-color:rgba(var(--accent-rgb), .35);}
+
+/* seleção de categoria e selo de demonstração seguem a cor do tema (antes: azul e amarelo fixos) */
+.cat-grid-item.selected{background:rgba(var(--accent-rgb), .10);}
+.demo-badge{background:rgba(var(--accent-rgb), .12); color:var(--blue);}
+[data-theme="dark"] .demo-badge{background:rgba(var(--accent-rgb), .18); color:var(--blue);}
+.screen-relatorios .flow-tile{cursor:default;}
+.screen-relatorios .flow-tile:active{transform:none;}
