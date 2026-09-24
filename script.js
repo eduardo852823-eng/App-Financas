@@ -312,7 +312,13 @@ let catDetalhe = null;
 let catMode = "cats";      // "cats" | "comparar" (Comparar meses agora vive dentro de Categorias)
 let catMonth = null;       // "AAAA-MM" do mês mostrado em Categorias (null = mês atual)
 let compTipo = "saida";
-let delSimId = null;       // transação aguardando a resposta "excluir as parecidas?"
+let delSimId = null;
+let planMonth = null;   // "AAAA-MM" mostrado na aba Planejamento
+let planMode = "futuros"; // "futuros" | "metas"
+let editingPlanId = null;
+let payPlanId = null;
+let editingGoalCategory = null;
+let editingGoalId = null; // meta existente sendo editada (null = nova)       // transação aguardando a resposta "excluir as parecidas?"
 let pendingCatTxId = null;
 let pendingCatSelected = null;
 let editingCatId = null;
@@ -357,11 +363,12 @@ const NAV_DEFS = {
   inicio:       { label: "Início",        svg: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>' },
   transacoes:   { label: "Transações",    svg: '<path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/>' },
   categorias:   { label: "Categorias",    svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>' },
+  planejamento: { label: "Planejamento", svg: '<path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>' },
   investimentos:{ label: "Investimentos", svg: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>' },
   creditos:     { label: "Créditos",      svg: '<path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0112 6a5.2 5.2 0 019.3 6c-2.3 4.4-9.3 9-9.3 9z"/>' },
   bancos:       { label: "Instituições",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
 };
-const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
+const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","planejamento","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
 function getNavCfg() {
   try {
     const c = JSON.parse(localStorage.getItem("navCfg") || "null");
@@ -516,6 +523,7 @@ function navigateTo(screen, { refresh = true } = {}) {
   if (NAV_DEFS[remember]) localStorage.setItem("lastScreen", remember); // ao reabrir o app volta para onde você parou
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   if (screen === "categorias" && currentScreen !== "categorias" && currentScreen !== "categoria-detalhe") catMonth = null; // ao entrar, sempre o mês atual
+  if (screen === "planejamento" && currentScreen !== "planejamento") planMonth = null;
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
@@ -559,6 +567,7 @@ function renderScreen(screen) {
   if (screen === "entradas-saidas") renderEntradasSaidas();
   if (screen === "categorias") renderCategorias();
   if (screen === "categoria-detalhe") renderCategoriaDetalhe();
+  if (screen === "planejamento") renderPlanejamento();
 }
 
 /* ============================================================
@@ -762,13 +771,8 @@ function kvRow(label, valueHtml) {
 const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
 
 const TRASH_SVG = ICONS.trash(16);
-// Olho do cartão: esconde de uma vez fatura, vencimento, fechamento, pagamento mínimo, compras e limites (lembra a escolha)
-let hideCardInfo = localStorage.getItem("hideCardInfo") === "1";
-function toggleCardInfo() {
-  hideCardInfo = !hideCardInfo;
-  localStorage.setItem("hideCardInfo", hideCardInfo ? "1" : "0");
-  renderCards();
-}
+// Detalhes do cartão (fatura, vencimento etc.) ficam recolhidos; "Ver mais" abre, por cartão
+const openCardDetails = new Set();
 function cardHtml(a) {
   const d = a.data || {};
   const c = d.creditData || {};
@@ -780,39 +784,34 @@ function cardHtml(a) {
   const bill = bills[0];
   const spent = -state.transactions.filter(t => t.bank_id === a.account_id).reduce((s, t) => s + t.value, 0);
   const sub = [c.brand, c.level].filter(Boolean).map(esc).join(" ") + (d.number ? ` • final ${esc(d.number)}` : "");
-  const H = hideCardInfo;
-  const hv = (x) => (H && x ? "••••" : x); // mantém vazio o que não existe
-  const cm = (v) => hv(money(v));
+  const open = openCardDetails.has(a.account_id);
   const rows = [
-    bill ? kvRow("Fatura", cm(bill.totalAmount)) : "",
-    bill ? kvRow("Vencimento", hv(esc(fmtDate(bill.dueDate)))) : kvRow("Vencimento", hv(esc(fmtDate(c.balanceDueDate)))),
-    kvRow("Fechamento", hv(esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))),
-    kvRow("Pagamento mínimo", cm(bill ? bill.minimumPaymentAmount : c.minimumPayment)),
-    kvRow("Compras registradas", cm(spent))
+    bill ? kvRow("Fatura", money(bill.totalAmount)) : "",
+    bill ? kvRow("Vencimento", esc(fmtDate(bill.dueDate))) : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate))),
+    kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate))),
+    kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment)),
+    kvRow("Compras registradas", money(spent))
   ].join("");
 
   return `<div class="credit-card-item">
     <div class="credit-card-top" style="background:${color}">
-      <button type="button" class="cc-eye" data-card-eye aria-pressed="${H}" title="${H ? "Mostrar dados do cartão" : "Esconder dados do cartão"}" aria-label="${H ? "Mostrar dados do cartão" : "Esconder dados do cartão"}">${H ? ICONS.eyeOff(18) : ICONS.eye(18)}</button>
       <div class="credit-card-name">${esc(title)}</div>
       <div class="credit-card-sub">${sub || "Cartão de crédito"}</div>
     </div>
     <div class="credit-card-body">
-      ${pct !== null ? (H
-        ? `<div class="limit-used">Dados escondidos</div>`
-        : `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
-        <div class="limit-used">${pct.toFixed(0)}% do limite usado</div>`) : ""}
+      ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+        <div class="limit-used">${pct.toFixed(0)}% do limite usado</div>` : ""}
       <div class="limit-highlight-row">
         <div class="limit-highlight">
           <span class="limit-highlight-label">Limite total</span>
-          <span class="limit-highlight-value">${cm(limit) || "—"}</span>
+          <span class="limit-highlight-value">${money(limit) || "—"}</span>
         </div>
         <div class="limit-highlight">
           <span class="limit-highlight-label">Limite disponível</span>
-          <span class="limit-highlight-value">${cm(avail) || "—"}</span>
+          <span class="limit-highlight-value">${money(avail) || "—"}</span>
         </div>
       </div>
-      ${rows ? `<div class="kv-grid">${rows}</div>` : ""}
+      ${rows ? `<button type="button" class="cc-more" data-card-more="${esc(a.account_id)}">${open ? "Ver menos" : "Ver mais"} ${open ? "▲" : "▼"}</button><div class="kv-grid${open ? "" : " hidden"}">${rows}</div>` : ""}
       <div class="cc-actions">
         <button class="btn-connect card-tx-btn" type="button" data-card-tx="${esc(a.account_id)}">Ver transações</button>
         <button class="btn-connect danger" type="button" data-card-del="${esc(a.account_id)}">Excluir cartão</button>
@@ -1013,6 +1012,204 @@ function renderLegend(elId, byCat, total) {
       <span class="legend-pct">${pct}%</span>
     </div>`;
   }).join("");
+}
+
+/* ============================================================
+   PLANEJAMENTO — gastos/ganhos futuros e metas por categoria
+   ============================================================ */
+let planItemsCache = [];
+let goalsCache = [];
+function parseValorInput(str) {
+  const n = Number(String(str || "").replace(/\./g, "").replace(",", "."));
+  return isFinite(n) ? n : NaN;
+}
+async function loadPlanData() {
+  [planItemsCache, goalsCache] = await Promise.all([api("/planned"), api("/goals")]);
+}
+function renderPlanejamento() {
+  if (!planMonth) planMonth = curYm();
+  document.querySelectorAll("#plan-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.pmode === planMode));
+  document.getElementById("plan-futuros").classList.toggle("hidden", planMode !== "futuros");
+  document.getElementById("plan-metas").classList.toggle("hidden", planMode !== "metas");
+  loadPlanData().then(() => {
+    if (planMode === "futuros") renderPlanFuturos(); else renderMetas();
+  }).catch(e => showToast("Não foi possível carregar o planejamento: " + e.message, { error: true }));
+}
+function renderPlanFuturos() {
+  document.getElementById("plan-month-label").textContent = monthLabel(planMonth);
+  const items = planItemsCache.filter(p => p.month === planMonth).sort((a, b) => (a.paid - b.paid) || (a.id - b.id));
+  const planejado = items.filter(p => !p.paid && p.type === "saida").reduce((s, p) => s + p.value, 0);
+  const gastoReal = state.transactions.filter(t => t.date.slice(0, 7) === planMonth && t.type === "saida" && !isCreditTx(t)).reduce((s, t) => s + Math.abs(t.value), 0);
+  const recebido = state.transactions.filter(t => t.date.slice(0, 7) === planMonth && t.type === "entrada").reduce((s, t) => s + t.value, 0);
+  const resta = recebido - gastoReal - planejado;
+  document.getElementById("plan-sum-planejado").textContent = fmtBRL(planejado);
+  document.getElementById("plan-sum-gasto").textContent = fmtBRL(gastoReal);
+  document.getElementById("plan-sum-recebido").textContent = fmtBRL(recebido);
+  const restaEl = document.getElementById("plan-sum-resta");
+  restaEl.textContent = fmtBRL(Math.abs(resta));
+  restaEl.style.color = resta >= 0 ? "var(--green)" : "var(--out)";
+  document.getElementById("plan-sum-resta-label").textContent = resta >= 0 ? "Sobra" : "Falta";
+  const el = document.getElementById("plan-list");
+  if (!items.length) { el.innerHTML = `<div class="empty-state">Nada planejado para ${esc(monthLabel(planMonth))} ainda.</div>`; return; }
+  el.innerHTML = items.map(p => `
+    <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
+      <div class="plan-row-main">
+        <div class="plan-row-name">${esc(p.name)}</div>
+        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"}${p.paid ? " • pago" : ""}</div>
+      </div>
+      <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
+      <div class="plan-row-actions">
+        ${p.paid
+          ? `<button type="button" class="btn-link-small" data-plan-unpay="${p.id}">Desfazer</button>`
+          : `<button type="button" class="btn-connect" data-plan-pay="${p.id}">Marcar como pago</button>
+             <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
+        <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
+      </div>
+    </div>`).join("");
+}
+function changePlanMonth(delta) { planMonth = shiftYm(planMonth || curYm(), delta); renderPlanFuturos(); }
+
+function openPlanModal(id) {
+  editingPlanId = id || null;
+  const item = id ? planItemsCache.find(p => p.id === Number(id)) : null;
+  document.getElementById("plan-modal-title").textContent = item ? "Editar item" : "Novo item";
+  document.getElementById("plan-nome").value = item ? item.name : "";
+  document.getElementById("plan-valor").value = item ? String(item.value).replace(".", ",") : "";
+  document.getElementById("plan-mes").value = item ? item.month : (planMonth || curYm());
+  const tipo = item ? item.type : "saida";
+  document.querySelectorAll("#plan-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.tipo === tipo));
+  document.getElementById("plan-error").classList.add("hidden");
+  openModal("modal-planejado");
+}
+async function savePlanejado() {
+  const name = document.getElementById("plan-nome").value.trim();
+  const value = parseValorInput(document.getElementById("plan-valor").value);
+  const month = document.getElementById("plan-mes").value;
+  const type = document.querySelector("#plan-tipo-seg .seg-btn.active")?.dataset.tipo || "saida";
+  const errEl = document.getElementById("plan-error");
+  errEl.classList.add("hidden");
+  if (!name || !value || value <= 0 || !month) {
+    errEl.textContent = "Preencha nome, valor e mês.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  try {
+    if (editingPlanId) await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month } });
+    else await api("/planned", { method: "POST", body: { name, value, type, month } });
+    editingPlanId = null;
+    closeAllModals();
+    planMonth = month;
+    renderPlanejamento();
+  } catch (e) {
+    errEl.textContent = e.message || "Não foi possível salvar.";
+    errEl.classList.remove("hidden");
+  }
+}
+async function deletePlanItem(id) {
+  if (!confirm("Excluir este item do planejamento?")) return;
+  try { await api(`/planned/${id}`, { method: "DELETE" }); renderPlanejamento(); }
+  catch (e) { showToast("Não foi possível excluir: " + e.message, { error: true }); }
+}
+function askMarkPaid(id) {
+  payPlanId = id;
+  const item = planItemsCache.find(p => p.id === Number(id));
+  document.getElementById("pay-item-name").textContent = item ? `${item.name} — ${fmtBRL(item.value)}` : "";
+  openModal("modal-marcar-pago");
+}
+async function confirmMarkPaid(btn) {
+  const id = payPlanId; if (!id) return;
+  await withLoading(btn, async () => {
+    try {
+      await api(`/planned/${id}/pay`, { method: "POST" });
+      await refreshTransactions();
+      payPlanId = null;
+      closeAllModals();
+      renderPlanejamento();
+      showToast("Marcado como pago e lançado nas transações.");
+    } catch (e) { showToast("Não foi possível marcar como pago: " + e.message, { error: true }); }
+  });
+}
+async function unpayPlanItem(id) {
+  if (!confirm("Desfazer? A transação criada vai ser apagada.")) return;
+  try { await api(`/planned/${id}/unpay`, { method: "POST" }); await refreshTransactions(); renderPlanejamento(); }
+  catch (e) { showToast("Não foi possível desfazer: " + e.message, { error: true }); }
+}
+
+/* ---------- metas por categoria ---------- */
+function goalFor(category, month) {
+  return goalsCache.find(g => g.category === category && g.month === month)
+    || goalsCache.find(g => g.category === category && g.month === null)
+    || null;
+}
+function renderMetas() {
+  const ym = planMonth || curYm();
+  const cats = allCategories().filter(c => c.id !== "salario" && c.id !== "nao_identificada");
+  const gastoByCat = {};
+  state.transactions.filter(t => t.date.slice(0, 7) === ym && t.type === "saida").forEach(t => {
+    const c = effectiveCategory(t);
+    gastoByCat[c] = (gastoByCat[c] || 0) + Math.abs(t.value);
+  });
+  const el = document.getElementById("metas-list");
+  el.innerHTML = cats.map(c => {
+    const goal = goalFor(c.id, ym);
+    const gasto = gastoByCat[c.id] || 0;
+    if (!goal) {
+      return `<div class="meta-row" data-cat="${esc(c.id)}">
+        <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
+        <div class="meta-row-main">
+          <div class="cat-name">${esc(c.name)}</div>
+          <div class="cat-pct">${fmtBRL(gasto)} gastos em ${esc(monthLabel(ym))}</div>
+        </div>
+        <button type="button" class="btn-link-small" data-meta-def="${esc(c.id)}">Definir meta</button>
+      </div>`;
+    }
+    const diff = goal.value - gasto;
+    const pct = Math.min(100, (gasto / goal.value) * 100);
+    const over = gasto > goal.value;
+    return `<div class="meta-row meta-row-set" data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
+      <div class="meta-row-top">
+        <div class="meta-row-head">
+          <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
+          <div class="meta-row-main"><div class="cat-name">${esc(c.name)}</div><div class="cat-pct">Meta: ${fmtBRL(goal.value)}${goal.month ? " (só " + esc(monthLabel(goal.month)) + ")" : ""}</div></div>
+        </div>
+        <div class="meta-amount">${fmtBRL(gasto)}</div>
+      </div>
+      <div class="cat-bar meta-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%;background:${over ? "var(--out)" : c.color}"></i></div>
+      <div class="meta-status ${over ? "over" : ""}">${over ? "Passou " + fmtBRL(Math.abs(diff)) : "Resta " + fmtBRL(diff)}</div>
+    </div>`;
+  }).join("");
+}
+function openMetaModal(catId) {
+  editingGoalCategory = catId;
+  const ym = planMonth || curYm();
+  const goal = goalFor(catId, ym);
+  editingGoalId = goal ? goal.id : null;
+  const info = catInfo(catId);
+  document.getElementById("meta-modal-title").textContent = `Meta — ${info.name}`;
+  document.getElementById("meta-valor").value = goal ? String(goal.value).replace(".", ",") : "";
+  const tipo = goal && goal.month ? "unico" : "fixo";
+  document.querySelectorAll("#meta-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.metatipo === tipo));
+  document.getElementById("meta-error").classList.add("hidden");
+  document.getElementById("btn-remover-meta").classList.toggle("hidden", !goal);
+  openModal("modal-meta");
+}
+async function saveMeta() {
+  const value = parseValorInput(document.getElementById("meta-valor").value);
+  const tipo = document.querySelector("#meta-tipo-seg .seg-btn.active")?.dataset.metatipo || "fixo";
+  const errEl = document.getElementById("meta-error");
+  errEl.classList.add("hidden");
+  if (!value || value <= 0) { errEl.textContent = "Informe um valor válido."; errEl.classList.remove("hidden"); return; }
+  const ym = planMonth || curYm();
+  try {
+    await api("/goals", { method: "POST", body: { category: editingGoalCategory, value, month: tipo === "unico" ? ym : null } });
+    closeAllModals();
+    renderPlanejamento();
+  } catch (e) { errEl.textContent = e.message || "Não foi possível salvar a meta."; errEl.classList.remove("hidden"); }
+}
+async function removeMeta() {
+  if (!editingGoalId) { closeAllModals(); return; }
+  try { await api(`/goals/${editingGoalId}`, { method: "DELETE" }); closeAllModals(); renderPlanejamento(); }
+  catch (e) { showToast("Não foi possível remover: " + e.message, { error: true }); }
 }
 
 /* ============================================================
@@ -2102,7 +2299,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("btn-confirmar-excluir-cartao")?.addEventListener("click", (e) => confirmDeleteCard(e.currentTarget));
     document.getElementById("cards-list").addEventListener("click", (e) => {
-      if (e.target.closest("[data-card-eye]")) { toggleCardInfo(); return; }
+      const moreBtn = e.target.closest("[data-card-more]");
+      if (moreBtn) {
+        const id = moreBtn.dataset.cardMore;
+        if (openCardDetails.has(id)) openCardDetails.delete(id); else openCardDetails.add(id);
+        renderCards();
+        return;
+      }
       const delBtn = e.target.closest("[data-card-del]");
       if (delBtn) { askDeleteCard(delBtn.dataset.cardDel); return; }
       const b = e.target.closest("[data-card-tx]");
@@ -2217,6 +2420,44 @@ document.addEventListener("DOMContentLoaded", () => {
       if (row) { catMonth = document.getElementById("comp-mes2").value || catMonth; catSegment = compTipo === "saida" ? "gastos" : "ganhos"; openCategoriaDetalhe(row.dataset.cat); }
     });
   }, "comparar meses");
+
+  wire(() => {
+    document.getElementById("plan-mode").addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn"); if (!btn) return;
+      planMode = btn.dataset.pmode;
+      renderPlanejamento();
+    });
+    document.getElementById("plan-prev").addEventListener("click", () => changePlanMonth(-1));
+    document.getElementById("plan-next").addEventListener("click", () => changePlanMonth(1));
+    document.getElementById("btn-novo-planejado").addEventListener("click", (e) => { e.preventDefault(); openPlanModal(null); });
+    document.getElementById("plan-tipo-seg").addEventListener("click", (e) => {
+      const b = e.target.closest(".seg-btn"); if (!b) return;
+      document.querySelectorAll("#plan-tipo-seg .seg-btn").forEach(x => x.classList.toggle("active", x === b));
+    });
+    document.getElementById("btn-salvar-planejado").addEventListener("click", (e) => withLoading(e.currentTarget, savePlanejado));
+    document.getElementById("plan-list").addEventListener("click", (e) => {
+      const row = e.target.closest("[data-plan-id]"); if (!row) return;
+      const id = row.dataset.planId;
+      if (e.target.closest("[data-plan-pay]")) return askMarkPaid(id);
+      if (e.target.closest("[data-plan-unpay]")) return unpayPlanItem(id);
+      if (e.target.closest("[data-plan-edit]")) return openPlanModal(id);
+      if (e.target.closest("[data-plan-del]")) return deletePlanItem(id);
+    });
+    document.getElementById("btn-confirmar-pago").addEventListener("click", (e) => withLoading(e.currentTarget, () => confirmMarkPaid(e.currentTarget)));
+
+    document.getElementById("metas-list").addEventListener("click", (e) => {
+      const def = e.target.closest("[data-meta-def]");
+      if (def) return openMetaModal(def.dataset.metaDef);
+      const row = e.target.closest("[data-meta-edit]");
+      if (row) return openMetaModal(row.dataset.metaEdit);
+    });
+    document.getElementById("meta-tipo-seg").addEventListener("click", (e) => {
+      const b = e.target.closest(".seg-btn"); if (!b) return;
+      document.querySelectorAll("#meta-tipo-seg .seg-btn").forEach(x => x.classList.toggle("active", x === b));
+    });
+    document.getElementById("btn-salvar-meta").addEventListener("click", (e) => withLoading(e.currentTarget, saveMeta));
+    document.getElementById("btn-remover-meta").addEventListener("click", (e) => withLoading(e.currentTarget, removeMeta));
+  }, "planejamento");
 
   wire(() => {
     document.getElementById("btn-del-sim-all").addEventListener("click", (e) => confirmDeleteSimilar(true, e.currentTarget));

@@ -196,6 +196,18 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, key TEXT NOT NULL, label TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')), UNIQUE (user_id, key)
   )`);
+  // Planejamento: gastos/ganhos futuros ("vou pagar 500 pro meu pai em outubro") e metas de gasto por categoria
+  await db.execute(`CREATE TABLE IF NOT EXISTS planned_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, value REAL NOT NULL,
+    type TEXT NOT NULL, month TEXT NOT NULL, paid INTEGER DEFAULT 0, tx_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS category_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, month TEXT,
+    value REAL NOT NULL, created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_goals_month ON category_goals(user_id, category, month) WHERE month IS NOT NULL");
+  await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_goals_fixed ON category_goals(user_id, category) WHERE month IS NULL");
 }
 
 /* ============================================================
@@ -937,6 +949,99 @@ app.delete("/api/blocked-names/:id", auth, h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+
+/* ============================================================
+   PLANEJAMENTO — gastos/ganhos futuros e metas por categoria
+   ============================================================ */
+app.get("/api/planned", auth, h(async (req, res) => {
+  res.json(await all("SELECT * FROM planned_items WHERE user_id = ? ORDER BY month, created_at", [req.userId]));
+}));
+app.post("/api/planned", auth, h(async (req, res) => {
+  const { name, value, type, month } = req.body;
+  if (!name || typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "Dê um nome para o planejado." });
+  const v = Number(value);
+  if (!v || v <= 0) return res.status(400).json({ error: "Valor inválido." });
+  if (!["entrada", "saida"].includes(type)) return res.status(400).json({ error: "Tipo inválido." });
+  if (!/^\d{4}-\d{2}$/.test(month || "")) return res.status(400).json({ error: "Mês inválido." });
+  const r = await run("INSERT INTO planned_items (user_id, name, value, type, month) VALUES (?,?,?,?,?)", [req.userId, name.trim(), v, type, month]);
+  res.json(await get("SELECT * FROM planned_items WHERE id = ?", [r.lastInsertRowid]));
+}));
+app.put("/api/planned/:id", auth, h(async (req, res) => {
+  const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!item) return res.status(404).json({ error: "Não encontrado" });
+  if (item.paid) return res.status(400).json({ error: "Já foi marcado como pago. Desfaça o pagamento antes de editar." });
+  const { name, value, type, month } = req.body;
+  const v = Number(value);
+  if (!name || !name.trim() || !v || v <= 0 || !["entrada", "saida"].includes(type) || !/^\d{4}-\d{2}$/.test(month || "")) {
+    return res.status(400).json({ error: "Dados inválidos." });
+  }
+  await run("UPDATE planned_items SET name = ?, value = ?, type = ?, month = ? WHERE id = ? AND user_id = ?", [name.trim(), v, type, month, item.id, req.userId]);
+  res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
+}));
+app.delete("/api/planned/:id", auth, h(async (req, res) => {
+  const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!item) return res.status(404).json({ error: "Não encontrado" });
+  if (item.tx_id) await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [item.tx_id, req.userId]);
+  await run("DELETE FROM planned_items WHERE id = ? AND user_id = ?", [item.id, req.userId]);
+  res.json({ ok: true });
+}));
+// Marca como pago: cria a transação de verdade (desconta do saldo) e a IA escolhe a categoria pelo nome.
+app.post("/api/planned/:id/pay", auth, h(async (req, res) => {
+  const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!item) return res.status(404).json({ error: "Não encontrado" });
+  if (item.paid) return res.status(400).json({ error: "Já está marcado como pago." });
+  const ctx = await buildUserCtx(req.userId);
+  const { cat, source } = classify(item.name, ctx);
+  const today = new Date().toISOString().slice(0, 10);
+  const date = item.month === today.slice(0, 7) ? today : `${item.month}-01`;
+  const value = item.type === "entrada" ? Math.abs(item.value) : -Math.abs(item.value);
+  const r = await run(
+    `INSERT INTO transactions (user_id, date, "desc", bank_id, value, type, category, category_source) VALUES (?,?,?,?,?,?,?,?)`,
+    [req.userId, date, item.name, "planejamento", value, item.type, cat, source || "model"]
+  );
+  await run("UPDATE planned_items SET paid = 1, tx_id = ? WHERE id = ?", [r.lastInsertRowid, item.id]);
+  res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
+}));
+// Desfaz: apaga a transação criada e volta o item para "não pago"
+app.post("/api/planned/:id/unpay", auth, h(async (req, res) => {
+  const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!item) return res.status(404).json({ error: "Não encontrado" });
+  if (item.tx_id) await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [item.tx_id, req.userId]);
+  await run("UPDATE planned_items SET paid = 0, tx_id = NULL WHERE id = ?", [item.id]);
+  res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
+}));
+
+app.get("/api/goals", auth, h(async (req, res) => {
+  res.json(await all("SELECT * FROM category_goals WHERE user_id = ? ORDER BY category", [req.userId]));
+}));
+// Cria/atualiza a meta de uma categoria (fixa = month null, vale todo mês; ou só um mês específico)
+app.post("/api/goals", auth, h(async (req, res) => {
+  const { category, month, value } = req.body;
+  const v = Number(value);
+  if (!category || !v || v <= 0) return res.status(400).json({ error: "Dados inválidos." });
+  const m = month && /^\d{4}-\d{2}$/.test(month) ? month : null;
+  await run(
+    `INSERT INTO category_goals (user_id, category, month, value) VALUES (?,?,?,?)
+     ON CONFLICT (user_id, category, month) WHERE month IS NOT NULL DO UPDATE SET value = excluded.value`,
+    [req.userId, category, m, v]
+  ).catch(async () => {
+    // fallback: SQLite não permite ON CONFLICT com índice parcial em algumas versões — resolve manual
+    const existing = m
+      ? await get("SELECT id FROM category_goals WHERE user_id = ? AND category = ? AND month = ?", [req.userId, category, m])
+      : await get("SELECT id FROM category_goals WHERE user_id = ? AND category = ? AND month IS NULL", [req.userId, category]);
+    if (existing) await run("UPDATE category_goals SET value = ? WHERE id = ?", [v, existing.id]);
+    else await run("INSERT INTO category_goals (user_id, category, month, value) VALUES (?,?,?,?)", [req.userId, category, m, v]);
+  });
+  const row = m
+    ? await get("SELECT * FROM category_goals WHERE user_id = ? AND category = ? AND month = ?", [req.userId, category, m])
+    : await get("SELECT * FROM category_goals WHERE user_id = ? AND category = ? AND month IS NULL", [req.userId, category]);
+  res.json(row);
+}));
+app.delete("/api/goals/:id", auth, h(async (req, res) => {
+  const info = await run("DELETE FROM category_goals WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!info.changes) return res.status(404).json({ error: "Não encontrado" });
+  res.json({ ok: true });
+}));
 
 /* ============================================================
    PLUGGY (Open Finance) — múltiplos CPFs por usuário

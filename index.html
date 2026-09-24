@@ -252,6 +252,35 @@
         </div>
       </section>
 
+      <!-- ---------- PLANEJAMENTO ---------- -->
+      <section class="screen screen-planejamento" data-screen="planejamento">
+        <div class="segmented" id="plan-mode">
+          <button class="seg-btn active" data-pmode="futuros">Gastos futuros</button>
+          <button class="seg-btn" data-pmode="metas">Metas por categoria</button>
+        </div>
+
+        <div id="plan-futuros">
+          <div class="month-nav" id="plan-month-nav">
+            <button type="button" class="month-arrow" id="plan-prev" aria-label="Mês anterior"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <div class="month-label" id="plan-month-label">—</div>
+            <button type="button" class="month-arrow" id="plan-next" aria-label="Próximo mês"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <div class="plan-summary-grid">
+            <div class="plan-sum-card"><span class="mini-label">Planejado</span><span class="mini-value" id="plan-sum-planejado">R$ 0,00</span></div>
+            <div class="plan-sum-card"><span class="mini-label">Já gasto</span><span class="mini-value" id="plan-sum-gasto">R$ 0,00</span></div>
+            <div class="plan-sum-card"><span class="mini-label">Recebido</span><span class="mini-value" id="plan-sum-recebido">R$ 0,00</span></div>
+            <div class="plan-sum-card"><span class="mini-label" id="plan-sum-resta-label">Resta</span><span class="mini-value" id="plan-sum-resta">R$ 0,00</span></div>
+          </div>
+          <div class="section-head"><h3>Itens do mês</h3><a href="#" class="link-small" id="btn-novo-planejado">+ Novo</a></div>
+          <div id="plan-list"></div>
+        </div>
+
+        <div id="plan-metas" class="hidden">
+          <p class="screen-hint">Defina quanto quer gastar por categoria. Metas fixas valem para todo mês; se quiser um valor só para um mês, escolha "Só este mês".</p>
+          <div id="metas-list"></div>
+        </div>
+      </section>
+
       <!-- ---------- INVESTIMENTOS ---------- -->
       <section class="screen screen-investimentos" data-screen="investimentos">
         <div class="card card-balance">
@@ -349,6 +378,74 @@
         <button class="icon-btn" data-close-modal>&times;</button>
       </div>
       <div class="modal-body" id="revisao-body"></div>
+    </div>
+  </div>
+
+  <!-- ===================== NOVO ITEM DO PLANEJAMENTO (modal) ===================== -->
+  <div class="modal-overlay" id="modal-planejado">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="plan-modal-title">Novo item</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Nome</label>
+        <input type="text" id="plan-nome" placeholder="Ex.: Pagamento pai" maxlength="80">
+        <label>Valor</label>
+        <input type="text" inputmode="decimal" id="plan-valor" placeholder="0,00">
+        <label>Mês</label>
+        <input type="month" id="plan-mes">
+        <label>Tipo</label>
+        <div class="segmented" id="plan-tipo-seg">
+          <button type="button" class="seg-btn active" data-tipo="saida">Gasto</button>
+          <button type="button" class="seg-btn" data-tipo="entrada">Ganho</button>
+        </div>
+        <div class="plan-error hidden" id="plan-error"></div>
+        <button class="btn btn-primary" id="btn-salvar-planejado" style="margin-top:16px">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MARCAR COMO PAGO (modal) ===================== -->
+  <div class="modal-overlay" id="modal-marcar-pago">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Marcar como pago?</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-card-name" id="pay-item-name"></p>
+        <p class="del-card-text">Isso cria uma transação de verdade, descontando do seu saldo. A categoria é escolhida automaticamente pelo nome — você pode trocá-la depois em Transações.</p>
+        <div class="del-sim-actions">
+          <button class="btn btn-primary" type="button" id="btn-confirmar-pago">Marcar como pago</button>
+          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== META DA CATEGORIA (modal) ===================== -->
+  <div class="modal-overlay" id="modal-meta">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="meta-modal-title">Meta</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Valor da meta (por mês)</label>
+        <input type="text" inputmode="decimal" id="meta-valor" placeholder="0,00">
+        <label>Vale para</label>
+        <div class="segmented" id="meta-tipo-seg">
+          <button type="button" class="seg-btn active" data-metatipo="fixo">Todo mês</button>
+          <button type="button" class="seg-btn" data-metatipo="unico">Só este mês</button>
+        </div>
+        <div class="plan-error hidden" id="meta-error"></div>
+        <div class="del-sim-actions" style="margin-top:16px">
+          <button class="btn btn-primary" type="button" id="btn-salvar-meta">Salvar meta</button>
+          <button class="btn btn-danger hidden" type="button" id="btn-remover-meta">Remover meta</button>
+          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -472,6 +569,10 @@
           <button class="profile-menu-item" data-nav="categorias" data-close-modal>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
             Categorias
+          </button>
+          <button class="profile-menu-item" data-nav="planejamento" data-close-modal>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+            Planejamento
           </button>
           <button class="profile-menu-item" data-nav="investimentos" data-close-modal>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>
