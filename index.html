@@ -180,22 +180,48 @@
         <div id="tx-list-container"></div>
       </section>
 
-      <!-- ---------- CATEGORIAS ---------- -->
+      <!-- ---------- CATEGORIAS (+ comparar meses) ---------- -->
       <section class="screen screen-categorias" data-screen="categorias">
-        <p class="screen-hint">Toque numa categoria para ver só as transações dela.</p>
-        <div class="section-head">
-          <h3>Categorias</h3>
-          <a href="#" class="link-small" id="btn-nova-categoria">+ Nova categoria</a>
+        <div class="segmented" id="cat-mode">
+          <button class="seg-btn active" data-mode="cats">Categorias</button>
+          <button class="seg-btn" data-mode="comparar">Comparar meses</button>
         </div>
-        <div class="segmented" id="cat-segmented">
-          <button class="seg-btn active" data-seg="gastos">Gastos</button>
-          <button class="seg-btn" data-seg="ganhos">Ganhos</button>
+
+        <div id="cat-view">
+          <div class="month-nav" id="cat-month-nav">
+            <button type="button" class="month-arrow" id="cat-prev" aria-label="Mês anterior"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <div class="month-label" id="cat-month-label">—</div>
+            <button type="button" class="month-arrow" id="cat-next" aria-label="Próximo mês"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <p class="screen-hint">Toque numa fatia do gráfico para ver o valor. Toque numa categoria para ver as transações dela.</p>
+          <div class="section-head">
+            <h3>Categorias</h3>
+            <a href="#" class="link-small" id="btn-nova-categoria">+ Nova categoria</a>
+          </div>
+          <div class="segmented" id="cat-segmented">
+            <button class="seg-btn active" data-seg="gastos">Gastos</button>
+            <button class="seg-btn" data-seg="ganhos">Ganhos</button>
+          </div>
+          <div class="card cat-chart-card">
+            <div class="donut-wrap"><canvas id="cat-donut" width="240" height="240" aria-label="Gráfico de categorias do mês"></canvas></div>
+            <div class="donut-legend" id="cat-legend"></div>
+          </div>
+          <div id="categorias-list"></div>
         </div>
-        <div class="card cat-chart-card">
-          <canvas id="cat-donut" width="240" height="240"></canvas>
-          <div class="donut-legend" id="cat-legend"></div>
+
+        <div id="cat-comparar" class="hidden">
+          <p class="screen-hint">Escolha dois meses para ver a diferença, categoria por categoria.</p>
+          <div class="segmented" id="comp-tipo-seg">
+            <button class="seg-btn active" data-tipo="saida">Gastos</button>
+            <button class="seg-btn" data-tipo="entrada">Ganhos</button>
+          </div>
+          <div class="comp-selects">
+            <select id="comp-mes1" aria-label="Primeiro mês"></select>
+            <span class="vs-label">VS</span>
+            <select id="comp-mes2" aria-label="Segundo mês"></select>
+          </div>
+          <div class="card" id="comp-resultado"></div>
         </div>
-        <div id="categorias-list"></div>
       </section>
 
       <!-- ---------- DETALHE DA CATEGORIA ---------- -->
@@ -219,7 +245,7 @@
             <li><b>Conecte seus bancos</b> em "Minhas instituições" (menu do perfil). O app só lê os dados, nunca guarda sua senha.</li>
             <li><b>Início:</b> veja o saldo, quanto entrou e saiu, e seus cartões.</li>
             <li><b>Transações:</b> toque numa transação para trocar a categoria.</li>
-            <li><b>Categorias:</b> toque numa categoria para ver só os gastos ou ganhos dela.</li>
+            <li><b>Categorias:</b> veja os gastos e ganhos do mês (as setas trocam de mês) e toque numa categoria para ver as transações dela. Em "Comparar meses" você vê a diferença entre dois meses.</li>
             <li><b>Investimentos:</b> acompanhe o que está aplicado e quanto rendeu.</li>
             <li><b>Configurações:</b> mude a cor do app e a ordem das abas de baixo.</li>
           </ol>
@@ -235,68 +261,6 @@
         </div>
         <p class="screen-hint">Rendeu = valor de hoje menos o que você aplicou.</p>
         <div id="inv-list"></div>
-      </section>
-
-      <!-- ---------- RELATÓRIOS ---------- -->
-      <section class="screen screen-relatorios" data-screen="relatorios">
-        <p class="screen-hint">Escolha um mês para ver quanto entrou, saiu e sobrou.</p>
-        <div class="segmented" id="rel-segmented">
-          <button class="seg-btn active" data-seg="geral">Resumo</button>
-          <button class="seg-btn" data-seg="comparar">Comparar meses</button>
-        </div>
-
-        <div id="rel-geral">
-          <div class="filters-grid rel-filters-2">
-            <div>
-              <label class="mini-lbl">Mês</label>
-              <select id="rel-mes"></select>
-            </div>
-            <div>
-              <label class="mini-lbl">Ano</label>
-              <select id="rel-ano"></select>
-            </div>
-          </div>
-          <details class="more-filters">
-            <summary>Mais filtros (banco e categoria)</summary>
-            <div class="filters-grid">
-              <div><label class="mini-lbl">Banco</label><select id="rel-banco"><option value="all">Todos</option></select></div>
-              <div><label class="mini-lbl">Categoria</label><select id="rel-categoria"><option value="all">Todas</option></select></div>
-            </div>
-          </details>
-
-          <div class="flow-tiles">
-            <div class="flow-tile in">
-              <span class="flow-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
-              <span class="flow-txt"><span class="mini-label">Entrou</span><span class="mini-value" id="rel-entradas">R$ 0,00</span></span>
-            </div>
-            <div class="flow-tile out">
-              <span class="flow-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7L7 17M16 17H7V8"/></svg></span>
-              <span class="flow-txt"><span class="mini-label">Saiu</span><span class="mini-value" id="rel-saidas">R$ 0,00</span></span>
-            </div>
-          </div>
-          <div class="card card-result">
-            <span class="mini-label" id="rel-res-label">Sobrou</span>
-            <span class="mini-value" id="rel-resultado">R$ 0,00</span>
-          </div>
-          <p class="rel-frase" id="rel-frase"></p>
-
-          <div class="section-head"><h3>Gastos por banco</h3></div>
-          <div class="card" id="rel-por-banco"></div>
-        </div>
-
-        <div id="rel-comparar" class="hidden">
-          <label class="mini-lbl">Compare estes dois meses</label>
-          <select id="comp-mes1"></select>
-          <div class="vs-label">VS</div>
-          <select id="comp-mes2"></select>
-          <label class="mini-lbl" style="margin-top:14px">O que comparar?</label>
-          <select id="comp-tipo">
-            <option value="saida">O que gastei</option>
-            <option value="entrada">O que recebi</option>
-          </select>
-          <button class="btn btn-primary hidden" id="btn-comparar" style="margin-top:14px">Gerar comparação</button>
-          <div class="card hidden" id="comp-resultado"></div>
-        </div>
       </section>
 
     </main>
@@ -388,6 +352,25 @@
     </div>
   </div>
 
+  <!-- ===================== EXCLUIR TRANSAÇÕES PARECIDAS (modal) ===================== -->
+  <div class="modal-overlay" id="modal-excluir-parecidas">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Excluir parecidas também?</h3>
+        <button class="icon-btn" data-close-modal aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-card-name" id="del-sim-name"></p>
+        <p class="del-card-text" id="del-sim-text"></p>
+        <div class="del-sim-actions">
+          <button class="btn btn-danger" type="button" id="btn-del-sim-all">Excluir todas e as próximas</button>
+          <button class="btn btn-outline" type="button" id="btn-del-sim-one">Só esta</button>
+          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== EXCLUIR CARTÃO (modal) ===================== -->
   <div class="modal-overlay" id="modal-excluir-cartao">
     <div class="modal-card">
@@ -446,6 +429,8 @@
         <label>Abas de baixo <span class="cfg-hint">arraste pela alça para mudar a ordem • toque no olho para esconder</span></label>
         <ul class="nav-editor" id="nav-editor"></ul>
         <button type="button" class="btn-link-small" id="btn-nav-reset">Restaurar padrão</button>
+        <label>Nomes bloqueados <span class="cfg-hint">transações com esses nomes não entram mais no app. Toque em Desbloquear para elas voltarem.</span></label>
+        <ul class="blocked-list" id="blocked-list"><li class="blocked-empty">Nenhum nome bloqueado.</li></ul>
         <label class="checkbox-row" style="margin-top:14px">
           <input type="checkbox" id="cfg-modo-escuro"> Modo escuro
         </label>
@@ -487,10 +472,6 @@
           <button class="profile-menu-item" data-nav="categorias" data-close-modal>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
             Categorias
-          </button>
-          <button class="profile-menu-item" data-nav="relatorios" data-close-modal>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
-            Relatórios
           </button>
           <button class="profile-menu-item" data-nav="investimentos" data-close-modal>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>

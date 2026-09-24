@@ -187,6 +187,15 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     user_id INTEGER NOT NULL, item_id TEXT NOT NULL, inv_id TEXT NOT NULL, day TEXT NOT NULL, balance REAL,
     PRIMARY KEY (user_id, inv_id, day)
   )`);
+  // transações excluídas à mão (não voltam na sincronização) e nomes bloqueados ("excluir também as parecidas")
+  await db.execute(`CREATE TABLE IF NOT EXISTS deleted_tx (
+    user_id INTEGER NOT NULL, external_id TEXT NOT NULL, deleted_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, external_id)
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS blocked_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, key TEXT NOT NULL, label TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')), UNIQUE (user_id, key)
+  )`);
 }
 
 /* ============================================================
@@ -356,6 +365,18 @@ function merchantKey(desc) {
   const tokens = s.split(" ").filter(t => t.length > 1 && !/\d/.test(t));
   const key = tokens.slice(0, 3).join(" ");
   return key.length >= 3 ? key : "";
+}
+
+// "Mesmo nome" para excluir transações parecidas: ignora maiúsculas, acentos, pontuação e o número da parcela (2/12, parcela 2 de 12).
+const PARCEL_RE = /\b(?:parcela|parc)\.?\s*\d+\s*(?:\/|de)\s*\d+\b|\b\d{1,2}\s*\/\s*\d{1,2}\b/gi;
+function nameKey(desc) {
+  const s = String(desc || "").replace(PARCEL_RE, " ").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+  return s.length >= 2 ? s : "";
+}
+function nameLabel(desc) {
+  return String(desc || "").replace(PARCEL_RE, " ").replace(/\s{2,}/g, " ").trim() || String(desc || "");
 }
 
 
@@ -869,11 +890,53 @@ app.put("/api/transactions/:id/category", auth, h(async (req, res) => {
   res.json({ ok: true, applied });
 }));
 
+// Transações "parecidas" = mesmo nome (sem contar maiúsculas, acento e número de parcela).
+async function similarTx(userId, tx) {
+  const key = nameKey(tx.d);
+  if (!key) return { key: "", rows: [] };
+  const rows = await all(`SELECT id, "desc" AS d FROM transactions WHERE user_id = ? AND id <> ?`, [userId, tx.id]);
+  return { key, rows: rows.filter(r => nameKey(r.d) === key) };
+}
+app.get("/api/transactions/:id/similar", auth, h(async (req, res) => {
+  const tx = await get(`SELECT id, "desc" AS d FROM transactions WHERE id = ? AND user_id = ?`, [req.params.id, req.userId]);
+  if (!tx) return res.status(404).json({ error: "Transação não encontrada" });
+  const { rows } = await similarTx(req.userId, tx);
+  res.json({ count: rows.length, name: nameLabel(tx.d) });
+}));
+
+// ?similar=1 → apaga também as parecidas e bloqueia o nome (as próximas com esse nome não entram mais).
+// Sem isso, só apaga esta; se veio do banco, guarda o id para a sincronização não trazer de volta.
 app.delete("/api/transactions/:id", auth, h(async (req, res) => {
-  const info = await run("DELETE FROM transactions WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
-  if (!info.changes) return res.status(404).json({ error: "Transação não encontrada" });
+  const tx = await get(`SELECT id, "desc" AS d, external_id FROM transactions WHERE id = ? AND user_id = ?`, [req.params.id, req.userId]);
+  if (!tx) return res.status(404).json({ error: "Transação não encontrada" });
+  let extra = [], blocked = false;
+  if (req.query.similar === "1") {
+    const sim = await similarTx(req.userId, tx);
+    if (sim.key) {
+      extra = sim.rows;
+      blocked = true;
+      await run("INSERT OR IGNORE INTO blocked_names (user_id, key, label) VALUES (?,?,?)", [req.userId, sim.key, nameLabel(tx.d)]);
+    }
+  }
+  if (!blocked && tx.external_id) {
+    await run("INSERT OR IGNORE INTO deleted_tx (user_id, external_id) VALUES (?,?)", [req.userId, tx.external_id]);
+  }
+  const ids = [tx.id, ...extra.map(r => r.id)];
+  for (let i = 0; i < ids.length; i += 200) {
+    await db.batch(ids.slice(i, i + 200).map(id => ({ sql: "DELETE FROM transactions WHERE id = ? AND user_id = ?", args: [id, req.userId] })), "write");
+  }
+  res.json({ ok: true, deleted: ids.length, blocked, name: nameLabel(tx.d) });
+}));
+
+app.get("/api/blocked-names", auth, h(async (req, res) => {
+  res.json(await all("SELECT id, label FROM blocked_names WHERE user_id = ? ORDER BY label COLLATE NOCASE", [req.userId]));
+}));
+app.delete("/api/blocked-names/:id", auth, h(async (req, res) => {
+  const info = await run("DELETE FROM blocked_names WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
+  if (!info.changes) return res.status(404).json({ error: "Nome não encontrado" });
   res.json({ ok: true });
 }));
+
 
 /* ============================================================
    PLUGGY (Open Finance) — múltiplos CPFs por usuário
@@ -1059,6 +1122,9 @@ async function syncPluggyItemData(item, headers) {
   const accounts = allAccounts.filter(a => !hidden.has(a.id));
 
   const ctx = await buildUserCtx(item.user_id);
+  // o que o usuário excluiu à mão não volta: ids apagados e nomes bloqueados
+  const deletedIds = new Set((await all("SELECT external_id FROM deleted_tx WHERE user_id = ?", [item.user_id])).map(r => r.external_id));
+  const blockedKeys = new Set((await all("SELECT key FROM blocked_names WHERE user_id = ?", [item.user_id])).map(r => r.key));
   // transações antigas ainda "não identificadas" desta conexão: se agora dá para classificar, atualiza
   const pendentes = new Set((await all(
     "SELECT external_id FROM transactions WHERE user_id = ? AND bank_id = ? AND category = 'nao_identificada' AND COALESCE(category_manual, 0) = 0 AND external_id IS NOT NULL",
@@ -1082,6 +1148,7 @@ async function syncPluggyItemData(item, headers) {
     contas.push({ nome: acc.name, tipo: acc.type, transacoes: pluggyTx.length });
     for (const t of pluggyTx) {
       const desc = t.description || "Transação";
+      if (deletedIds.has(t.id) || (blockedKeys.size && blockedKeys.has(nameKey(desc)))) continue;
       const value = pluggyValue(t.amount, acc.type);
       const date = (t.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
       const { cat, source } = classify(desc, ctx, t, value);

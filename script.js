@@ -309,7 +309,10 @@ let txFilterCategoria = "all";
 let esTipo = "entrada";
 let catSegment = "gastos";
 let catDetalhe = null;
-let relSegment = "geral";
+let catMode = "cats";      // "cats" | "comparar" (Comparar meses agora vive dentro de Categorias)
+let catMonth = null;       // "AAAA-MM" do mês mostrado em Categorias (null = mês atual)
+let compTipo = "saida";
+let delSimId = null;       // transação aguardando a resposta "excluir as parecidas?"
 let pendingCatTxId = null;
 let pendingCatSelected = null;
 let editingCatId = null;
@@ -354,12 +357,11 @@ const NAV_DEFS = {
   inicio:       { label: "Início",        svg: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>' },
   transacoes:   { label: "Transações",    svg: '<path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3"/>' },
   categorias:   { label: "Categorias",    svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>' },
-  relatorios:   { label: "Relatórios",    svg: '<path d="M4 19V9M12 19V5M20 19v-7"/>' },
   investimentos:{ label: "Investimentos", svg: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>' },
   creditos:     { label: "Créditos",      svg: '<path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0112 6a5.2 5.2 0 019.3 6c-2.3 4.4-9.3 9-9.3 9z"/>' },
   bancos:       { label: "Instituições",   svg: '<path d="M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6"/>' }
 };
-const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","relatorios","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
+const NAV_DEFAULT = { order: ["inicio","transacoes","categorias","investimentos","bancos","creditos"], hidden: ["bancos","creditos"] };
 function getNavCfg() {
   try {
     const c = JSON.parse(localStorage.getItem("navCfg") || "null");
@@ -490,7 +492,7 @@ async function toggleTheme() {
     try { await api("/me/preferences", { method: "PUT", body: { theme: next, currency: state.preferences.currency } }); }
     catch (e) { console.warn("não foi possível salvar a preferência de tema", e); }
   }
-  if (["inicio", "relatorios", "categorias"].includes(currentScreen)) renderScreen(currentScreen);
+  if (["inicio", "categorias"].includes(currentScreen)) renderScreen(currentScreen);
 }
 
 /* ============================================================
@@ -513,6 +515,7 @@ function navigateTo(screen, { refresh = true } = {}) {
   const remember = screen === "categoria-detalhe" ? "categorias" : screen;
   if (NAV_DEFS[remember]) localStorage.setItem("lastScreen", remember); // ao reabrir o app volta para onde você parou
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
+  if (screen === "categorias" && currentScreen !== "categorias" && currentScreen !== "categoria-detalhe") catMonth = null; // ao entrar, sempre o mês atual
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
@@ -521,7 +524,7 @@ function navigateTo(screen, { refresh = true } = {}) {
     target.classList.add("active");
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
-  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", relatorios: "Relatórios", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
+  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   const topTitle = document.getElementById("topbar-title");
   if (screen === "inicio") topTitle.innerHTML = BRAND_HTML; else topTitle.textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
@@ -556,7 +559,6 @@ function renderScreen(screen) {
   if (screen === "entradas-saidas") renderEntradasSaidas();
   if (screen === "categorias") renderCategorias();
   if (screen === "categoria-detalhe") renderCategoriaDetalhe();
-  if (screen === "relatorios") renderRelatorios();
 }
 
 /* ============================================================
@@ -760,6 +762,13 @@ function kvRow(label, valueHtml) {
 const money = (v) => (num(v) !== null ? fmtBRL(v) : null);
 
 const TRASH_SVG = ICONS.trash(16);
+// Olho do cartão: esconde de uma vez fatura, vencimento, fechamento, pagamento mínimo, compras e limites (lembra a escolha)
+let hideCardInfo = localStorage.getItem("hideCardInfo") === "1";
+function toggleCardInfo() {
+  hideCardInfo = !hideCardInfo;
+  localStorage.setItem("hideCardInfo", hideCardInfo ? "1" : "0");
+  renderCards();
+}
 function cardHtml(a) {
   const d = a.data || {};
   const c = d.creditData || {};
@@ -771,30 +780,36 @@ function cardHtml(a) {
   const bill = bills[0];
   const spent = -state.transactions.filter(t => t.bank_id === a.account_id).reduce((s, t) => s + t.value, 0);
   const sub = [c.brand, c.level].filter(Boolean).map(esc).join(" ") + (d.number ? ` • final ${esc(d.number)}` : "");
+  const H = hideCardInfo;
+  const hv = (x) => (H && x ? "••••" : x); // mantém vazio o que não existe
+  const cm = (v) => hv(money(v));
   const rows = [
-    bill ? kvRow("Fatura", money(bill.totalAmount)) : "",
-    bill ? kvRow("Vencimento", esc(fmtDate(bill.dueDate))) : kvRow("Vencimento", esc(fmtDate(c.balanceDueDate))),
-    kvRow("Fechamento", esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate))),
-    kvRow("Pagamento mínimo", money(bill ? bill.minimumPaymentAmount : c.minimumPayment)),
-    kvRow("Compras registradas", money(spent))
+    bill ? kvRow("Fatura", cm(bill.totalAmount)) : "",
+    bill ? kvRow("Vencimento", hv(esc(fmtDate(bill.dueDate)))) : kvRow("Vencimento", hv(esc(fmtDate(c.balanceDueDate)))),
+    kvRow("Fechamento", hv(esc(fmtDate(bill ? (bill.billClosingDate || c.balanceCloseDate) : c.balanceCloseDate)))),
+    kvRow("Pagamento mínimo", cm(bill ? bill.minimumPaymentAmount : c.minimumPayment)),
+    kvRow("Compras registradas", cm(spent))
   ].join("");
 
   return `<div class="credit-card-item">
     <div class="credit-card-top" style="background:${color}">
+      <button type="button" class="cc-eye" data-card-eye aria-pressed="${H}" title="${H ? "Mostrar dados do cartão" : "Esconder dados do cartão"}" aria-label="${H ? "Mostrar dados do cartão" : "Esconder dados do cartão"}">${H ? ICONS.eyeOff(18) : ICONS.eye(18)}</button>
       <div class="credit-card-name">${esc(title)}</div>
       <div class="credit-card-sub">${sub || "Cartão de crédito"}</div>
     </div>
     <div class="credit-card-body">
-      ${pct !== null ? `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
-        <div class="limit-used">${pct.toFixed(0)}% do limite usado</div>` : ""}
+      ${pct !== null ? (H
+        ? `<div class="limit-used">Dados escondidos</div>`
+        : `<div class="limit-bar"><div style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+        <div class="limit-used">${pct.toFixed(0)}% do limite usado</div>`) : ""}
       <div class="limit-highlight-row">
         <div class="limit-highlight">
           <span class="limit-highlight-label">Limite total</span>
-          <span class="limit-highlight-value">${money(limit) || "—"}</span>
+          <span class="limit-highlight-value">${cm(limit) || "—"}</span>
         </div>
         <div class="limit-highlight">
           <span class="limit-highlight-label">Limite disponível</span>
-          <span class="limit-highlight-value">${money(avail) || "—"}</span>
+          <span class="limit-highlight-value">${cm(avail) || "—"}</span>
         </div>
       </div>
       ${rows ? `<div class="kv-grid">${rows}</div>` : ""}
@@ -850,62 +865,152 @@ function renderCards() {
 function themeColor(varName) {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
 }
-function drawDonut(canvasId, byCat, total, label = "gastos") {
-  const canvas = document.getElementById(canvasId);
+/* Donut das categorias: nítido em tela retina, fatias com respiro, animação de entrada e toque numa fatia
+   mostra nome, valor e % no centro (toque de novo, ou no centro, para desmarcar). */
+const donutStore = {};
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+function fitFont(ctx, text, weight, maxPx, startPx, minPx = 9) {
+  let px = startPx;
+  ctx.font = `${weight} ${px}px Inter, system-ui, sans-serif`;
+  while (px > minPx && ctx.measureText(text).width > maxPx) { px -= 1; ctx.font = `${weight} ${px}px Inter, system-ui, sans-serif`; }
+  return px;
+}
+function shortText(ctx, text, maxPx) {
+  if (ctx.measureText(text).width <= maxPx) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxPx) t = t.slice(0, -1);
+  return t + "…";
+}
+function paintDonut(canvasId, progress) {
+  const st = donutStore[canvasId]; if (!st) return;
+  const canvas = document.getElementById(canvasId); if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0,0,w,h);
-  const cx = w/2, cy = h/2, rOuter = Math.min(w,h)/2 - 6, rInner = rOuter * 0.62;
-  const holeColor = themeColor("--card-bg") || "#FFFFFF";
+  const { size, dpr, slices, total, label, selected } = st;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  const cx = size / 2, cy = size / 2;
+  const R = size / 2 - 9, thick = R * 0.34, rMid = R - thick / 2, rInner = R - thick;
   const textMain = themeColor("--text-main") || "#14213D";
   const textSecondary = themeColor("--text-secondary") || "#6B7A90";
   const emptyBg = themeColor("--gray-100") || "#EEF2F8";
-  if (!total || Object.keys(byCat).length === 0) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, Math.PI*2);
-    ctx.fillStyle = emptyBg;
-    ctx.fill();
-    ctx.font = "600 13px Inter, sans-serif";
+  ctx.lineCap = "butt";
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+
+  if (!slices.length) {
+    ctx.beginPath(); ctx.arc(cx, cy, rMid, 0, Math.PI * 2);
+    ctx.lineWidth = thick; ctx.strokeStyle = emptyBg; ctx.stroke();
     ctx.fillStyle = textSecondary;
-    ctx.textAlign = "center";
-    ctx.fillText("Sem dados", cx, cy+4);
+    ctx.font = "600 13px Inter, system-ui, sans-serif";
+    ctx.fillText("Sem dados", cx, cy + 4);
     return;
   }
-  let start = -Math.PI/2;
-  const entries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  entries.forEach(([cat, val]) => {
-    const angle = (val/total) * Math.PI*2;
+
+  const limit = -Math.PI / 2 + progress * Math.PI * 2;
+  const gap = slices.length > 1 ? 0.045 : 0;
+  slices.forEach((sl) => {
+    const isSel = selected === sl.cat;
+    const half = Math.min(gap / 2, (sl.a1 - sl.a0) * 0.3);
+    const from = sl.a0 + half, to = Math.min(sl.a1 - half, limit);
+    if (to <= from) return;
+    const grow = isSel ? 5 : 0;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, rOuter, start, start+angle);
-    ctx.closePath();
-    ctx.fillStyle = catInfo(cat).color;
-    ctx.fill();
-    start += angle;
+    ctx.arc(cx, cy, rMid + grow / 2, from, to);
+    ctx.lineWidth = thick + grow;
+    ctx.strokeStyle = sl.color;
+    ctx.globalAlpha = selected && !isSel ? 0.35 : 1;
+    ctx.stroke();
   });
-  ctx.beginPath();
-  ctx.arc(cx, cy, rInner, 0, Math.PI*2);
-  ctx.fillStyle = holeColor;
-  ctx.fill();
-  ctx.font = "700 15px Inter, sans-serif";
-  ctx.fillStyle = textMain;
-  ctx.textAlign = "center";
-  ctx.fillText(fmtBRL(total), cx, cy+2);
-  ctx.font = "600 11px Inter, sans-serif";
-  ctx.fillStyle = textSecondary;
-  ctx.fillText(label, cx, cy+18);
+  ctx.globalAlpha = 1;
+
+  // texto do centro
+  const inner = rInner * 2 - 22;
+  const sel = selected ? slices.find(x => x.cat === selected) : null;
+  if (sel) {
+    const info = catInfo(sel.cat);
+    const val = fmtBRL(sel.val);
+    ctx.fillStyle = textSecondary;
+    ctx.font = "600 12px Inter, system-ui, sans-serif";
+    ctx.fillText(shortText(ctx, info.name, inner), cx, cy - 12);
+    ctx.fillStyle = textMain;
+    fitFont(ctx, val, 800, inner, 20, 11);
+    ctx.fillText(val, cx, cy + 9);
+    ctx.fillStyle = sel.color;
+    ctx.font = "700 12px Inter, system-ui, sans-serif";
+    ctx.fillText(`${((sel.val / total) * 100).toFixed(1).replace(".", ",")}% do total`, cx, cy + 27);
+  } else {
+    const val = fmtBRL(total);
+    ctx.fillStyle = textSecondary;
+    ctx.font = "600 12px Inter, system-ui, sans-serif";
+    ctx.fillText(label, cx, cy - 10);
+    ctx.fillStyle = textMain;
+    fitFont(ctx, val, 800, inner, 22, 11);
+    ctx.fillText(val, cx, cy + 14);
+  }
+}
+function drawDonut(canvasId, byCat, total, label = "gastos", { animate = true } = {}) {
+  const canvas = document.getElementById(canvasId); if (!canvas) return;
+  const prev = donutStore[canvasId];
+  if (prev && prev.raf) cancelAnimationFrame(prev.raf);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const box = canvas.parentElement ? canvas.parentElement.clientWidth : 0;
+  const size = Math.max(200, Math.min(268, box || 240));
+  canvas.style.width = size + "px"; canvas.style.height = size + "px";
+  canvas.width = Math.round(size * dpr); canvas.height = Math.round(size * dpr);
+
+  const entries = Object.entries(byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  let start = -Math.PI / 2;
+  const slices = total > 0 ? entries.map(([cat, val]) => {
+    const ang = (val / total) * Math.PI * 2;
+    const sl = { cat, val, a0: start, a1: start + ang, color: catInfo(cat).color };
+    start += ang;
+    return sl;
+  }) : [];
+  const st = donutStore[canvasId] = { size, dpr, slices, total, label, selected: null, raf: 0 };
+
+  if (!canvas.dataset.wired) {
+    canvas.dataset.wired = "1";
+    canvas.style.cursor = "pointer";
+    canvas.addEventListener("click", (e) => {
+      const cur = donutStore[canvasId]; if (!cur || !cur.slices.length) return;
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2;
+      const scale = cur.size / r.width; // canvas em px de layout
+      const dist = Math.hypot(x, y) * scale;
+      const R = cur.size / 2 - 9, rInner = R * 0.66;
+      let hit = null;
+      if (dist >= rInner - 4 && dist <= R + 10) {
+        let a = Math.atan2(y, x); if (a < -Math.PI / 2) a += Math.PI * 2;
+        const f = cur.slices.find(sl => a >= sl.a0 && a < sl.a1);
+        hit = f ? f.cat : null;
+      }
+      cur.selected = hit && hit !== cur.selected ? hit : null;
+      paintDonut(canvasId, 1);
+      document.querySelectorAll("#cat-legend .legend-row").forEach(row => row.classList.toggle("active", !!cur.selected && row.dataset.cat === cur.selected));
+    });
+  }
+
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!animate || reduce || !slices.length) { paintDonut(canvasId, 1); return; }
+  const t0 = performance.now(), DUR = 750;
+  const tick = (now) => {
+    const t = Math.min(1, (now - t0) / DUR);
+    paintDonut(canvasId, easeOutCubic(t));
+    if (t < 1) st.raf = requestAnimationFrame(tick); else st.raf = 0;
+  };
+  st.raf = requestAnimationFrame(tick);
 }
 
 function renderLegend(elId, byCat, total) {
   const el = document.getElementById(elId);
-  const entries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  if (!entries.length) { el.innerHTML = `<div class="empty-state">Nenhuma transação no período.</div>`; return; }
+  const entries = Object.entries(byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) { el.innerHTML = ""; return; }
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
-    const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
-    return `<div class="legend-row" data-cat="${esc(cat)}">
-      <div class="legend-left"><span class="legend-dot" style="background:${info.color}"></span>${info.icon} ${esc(info.name)}</div>
-      <div><span class="legend-pct">${pct}%</span> &nbsp; ${fmtBRL(val)}</div>
+    const pct = total ? ((val / total) * 100).toFixed(1).replace(".", ",") : "0,0";
+    return `<div class="legend-row" data-cat="${esc(cat)}" title="${esc(info.name)}">
+      <span class="legend-dot" style="background:${info.color}"></span>
+      <span class="legend-name">${info.icon} ${esc(info.name)}</span>
+      <span class="legend-pct">${pct}%</span>
     </div>`;
   }).join("");
 }
@@ -921,18 +1026,19 @@ function renderCategoriaDetalhe() {
   const info = catInfo(catDetalhe);
   const isGasto = catSegment === "gastos";
   document.getElementById("topbar-title").textContent = info.name;
+  const ym = catMonth || curYm();
   const txs = state.transactions
-    .filter(t => (isGasto ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === catDetalhe)
+    .filter(t => t.date.slice(0, 7) === ym && (isGasto ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === catDetalhe)
     .sort((a, b) => b.date.localeCompare(a.date));
   const total = txs.reduce((s, t) => s + Math.abs(t.value), 0);
   const el = document.getElementById("catdet-container");
   const head = `<div class="card catdet-head">
     <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
     <div><div class="cat-name">${esc(info.name)}</div>
-    <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"}</div></div>
+    <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"} • ${esc(monthLabel(ym))}</div></div>
     <div class="cat-amount catdet-total ${isGasto ? "neg" : "pos"}">${fmtBRL(total)}</div>
   </div>`;
-  el.innerHTML = head + (txs.length ? `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria.</div>`);
+  el.innerHTML = head + (txs.length ? `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria neste mês.</div>`);
 }
 
 /* ============================================================
@@ -1098,11 +1204,60 @@ function openTxDetalhe(id) {
   openModal("modal-detalhe");
 }
 
-async function deleteTx(id) {
-  await api(`/transactions/${id}`, { method: "DELETE" });
+async function deleteTx(id, similar = false) {
+  const r = await api(`/transactions/${id}${similar ? "?similar=1" : ""}`, { method: "DELETE" });
   await refreshTransactions();
   closeAllModals();
   renderScreen(currentScreen);
+  if (r && r.blocked) {
+    showToast(`${r.deleted} transaç${r.deleted === 1 ? "ão excluída" : "ões excluídas"}. Novas com o nome "${r.name}" não entram mais. Dá para desfazer em Configurações.`, { ms: 7000 });
+  }
+}
+// Antes de excluir, vê se existem outras com o mesmo nome e pergunta se quer excluir todas (e as próximas)
+async function askDeleteTx(id) {
+  let sim = { count: 0, name: "" };
+  try { sim = await api(`/transactions/${id}/similar`); } catch (e) { /* segue com a exclusão simples */ }
+  if (sim && sim.count > 0) {
+    delSimId = id;
+    document.getElementById("del-sim-name").textContent = sim.name;
+    document.getElementById("del-sim-text").textContent =
+      `${sim.count === 1 ? "Existe 1 outra transação" : `Existem ${sim.count} outras transações`} com esse nome. Quer excluir ${sim.count === 1 ? "ela" : "todas"} e também as próximas que chegarem com o mesmo nome? Você pode desfazer depois em Configurações › Nomes bloqueados.`;
+    openModal("modal-excluir-parecidas");
+    return;
+  }
+  if (confirm("Excluir esta transação?")) await deleteTx(id, false);
+}
+async function confirmDeleteSimilar(similar, btn) {
+  const id = delSimId; if (id == null) return;
+  await withLoading(btn, async () => {
+    try { await deleteTx(id, similar); delSimId = null; }
+    catch (e) { showToast("Não foi possível excluir: " + e.message, { error: true }); }
+  });
+}
+
+/* ---------- nomes bloqueados (Configurações) ---------- */
+async function loadBlockedNames() {
+  const el = document.getElementById("blocked-list"); if (!el) return;
+  try {
+    const rows = await api("/blocked-names");
+    el.innerHTML = rows.length
+      ? rows.map(r => `<li class="blocked-item"><span class="blocked-name">${esc(r.label)}</span><button type="button" class="blocked-undo" data-unblock="${r.id}">Desbloquear</button></li>`).join("")
+      : `<li class="blocked-empty">Nenhum nome bloqueado.</li>`;
+  } catch (e) {
+    el.innerHTML = `<li class="blocked-empty">Não foi possível carregar agora.</li>`;
+  }
+}
+async function unblockName(id, btn) {
+  await withLoading(btn, async () => {
+    try {
+      await api(`/blocked-names/${id}`, { method: "DELETE" });
+      await loadBlockedNames();
+      showToast("Nome desbloqueado. As transações dele voltam na próxima sincronização.");
+      if ((state.pluggyItems || []).length) syncAllPluggy({ quiet: true }).catch(() => {});
+    } catch (e) {
+      showToast("Não foi possível desbloquear: " + e.message, { error: true });
+    }
+  }, { minMs: 300 });
 }
 
 function openCategoriaModal(txId) {
@@ -1290,36 +1445,61 @@ async function checkReviewPrompt() {
 /* ============================================================
    CATEGORIAS
    ============================================================ */
+function curYm() { return ymdLocal(new Date()).slice(0, 7); }
+function shiftYm(ym, delta) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function catEarliestYm() { const ms = getAvailableMonths(); return ms.length ? ms[ms.length - 1] : curYm(); }
+
 function renderCategorias() {
-  const txs = state.transactions.filter(t => catSegment === "gastos" ? t.type === "saida" : t.type === "entrada");
-  const total = txs.reduce((s,t) => s + Math.abs(t.value), 0);
+  if (!catMonth) catMonth = curYm();
+  document.getElementById("cat-view").classList.toggle("hidden", catMode !== "cats");
+  document.getElementById("cat-comparar").classList.toggle("hidden", catMode !== "comparar");
+  document.querySelectorAll("#cat-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === catMode));
+  if (catMode === "comparar") { renderComparar(); return; }
+
+  document.getElementById("cat-month-label").textContent = monthLabel(catMonth);
+  document.getElementById("cat-prev").disabled = catMonth <= catEarliestYm();
+  document.getElementById("cat-next").disabled = catMonth >= curYm();
+
+  const txs = state.transactions.filter(t => t.date.slice(0, 7) === catMonth && (catSegment === "gastos" ? t.type === "saida" : t.type === "entrada"));
+  const total = txs.reduce((s, t) => s + Math.abs(t.value), 0);
   const byCat = {};
   txs.forEach(t => {
     const c = effectiveCategory(t);
     byCat[c] = (byCat[c] || 0) + Math.abs(t.value);
   });
-  const entries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  drawDonut("cat-donut", byCat, total, catSegment === "gastos" ? "em gastos" : "em ganhos");
+  const entries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  drawDonut("cat-donut", byCat, total, catSegment === "gastos" ? "gastos do mês" : "ganhos do mês");
   renderLegend("cat-legend", byCat, total);
   const el = document.getElementById("categorias-list");
   if (!entries.length) {
-    el.innerHTML = `<div class="empty-state">Nenhuma transação nesta categoria.</div>`;
+    el.innerHTML = `<div class="empty-state">${catSegment === "gastos" ? "Nenhum gasto" : "Nenhum ganho"} em ${esc(monthLabel(catMonth))}.</div>`;
     return;
   }
   el.innerHTML = entries.map(([cat, val]) => {
     const info = catInfo(cat);
-    const pct = total ? ((val/total)*100).toFixed(1) : "0.0";
+    const pct = total ? (val / total) * 100 : 0;
     return `<div class="cat-row" data-cat="${esc(cat)}">
       <div class="cat-row-left">
         <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
-        <div>
+        <div class="cat-row-main">
           <div class="cat-name">${esc(info.name)}</div>
-          <div class="cat-pct">${pct}%</div>
+          <div class="cat-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%;background:${info.color}"></i></div>
+          <div class="cat-pct">${pct.toFixed(1).replace(".", ",")}%</div>
         </div>
       </div>
       <div class="cat-amount">${fmtBRL(val)}</div>
     </div>`;
   }).join("");
+}
+function changeCatMonth(delta) {
+  const next = shiftYm(catMonth || curYm(), delta);
+  if (next > curYm() || next < catEarliestYm()) return;
+  catMonth = next;
+  renderCategorias();
 }
 
 function openNovaCategoriaModal(editId) {
@@ -1391,135 +1571,71 @@ async function deleteCategoria(id) {
 }
 
 /* ============================================================
-   RELATÓRIOS
+   COMPARAR MESES (dentro de Categorias)
    ============================================================ */
-function populateRelatorioFilters() {
+function populateCompareSelects() {
   const months = getAvailableMonths();
-  const years = Array.from(new Set(months.map(m => m.slice(0,4)))).sort().reverse();
-  const anoSel = document.getElementById("rel-ano");
-  const currentAno = anoSel.value || years[0] || String(new Date().getFullYear());
-  anoSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("") || `<option value="${currentAno}">${currentAno}</option>`;
-  anoSel.value = currentAno;
-
-  const mesSel = document.getElementById("rel-mes");
-  const prevMes = mesSel.value;
-  mesSel.innerHTML = `<option value="all">Ano inteiro</option>` + MONTH_NAMES.map((m,i) => `<option value="${i}">${m}</option>`).join("");
-  mesSel.value = prevMes || String(new Date().getMonth());
-
-  const bancoSel = document.getElementById("rel-banco");
-  const prevBanco = bancoSel.value;
-  const bancos = bankAccountsOnly();
-  bancoSel.innerHTML = `<option value="all">Todos</option>` + bancos.map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("");
-  bancoSel.value = bancos.some(i => i.id === prevBanco) ? prevBanco : "all";
-
-  const catSel = document.getElementById("rel-categoria");
-  const prevCat = catSel.value;
-  const cats = allCategories();
-  catSel.innerHTML = `<option value="all">Todas</option>` + cats.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-  catSel.value = cats.some(c => c.id === prevCat) ? prevCat : "all";
-
-  const comp1 = document.getElementById("comp-mes1"), comp2 = document.getElementById("comp-mes2");
-  const opts = months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("");
-  comp1.innerHTML = opts; comp2.innerHTML = opts;
-  if (months.length > 1) { comp1.value = months[1]; comp2.value = months[0]; }
+  const cur = curYm();
+  if (!months.includes(cur)) months.unshift(cur);
+  const c1 = document.getElementById("comp-mes1"), c2 = document.getElementById("comp-mes2");
+  const p1 = c1.value, p2 = c2.value;
+  const opts = months.map(m => `<option value="${m}">${esc(monthLabel(m))}</option>`).join("");
+  c1.innerHTML = opts; c2.innerHTML = opts;
+  c1.value = months.includes(p1) ? p1 : (months[1] || months[0]);
+  c2.value = months.includes(p2) ? p2 : months[0];
 }
-
-function relFilteredTx() {
-  const ano = document.getElementById("rel-ano").value;
-  const mes = document.getElementById("rel-mes").value;
-  const banco = document.getElementById("rel-banco").value;
-  const categoria = document.getElementById("rel-categoria").value;
-  return state.transactions.filter(t => {
-    if (ano && !t.date.startsWith(ano)) return false;
-    if (mes !== "all" && parseInt(t.date.slice(5,7))-1 !== parseInt(mes)) return false;
-    if (banco !== "all" && t.bank_id !== banco) return false;
-    if (banco === "all" && isCreditTx(t)) return false; // cartão fica de fora dos totais gerais
-    if (categoria !== "all" && effectiveCategory(t) !== categoria) return false;
-    return true;
+function monthByCat(ym, tipo) {
+  const out = {};
+  state.transactions.forEach(t => {
+    if (t.date.slice(0, 7) !== ym || t.type !== tipo) return;
+    const c = effectiveCategory(t);
+    out[c] = (out[c] || 0) + Math.abs(t.value);
   });
+  return out;
 }
-
-function renderRelatorios() {
-  populateRelatorioFilters();
-  computeRelGeral();
+function renderComparar() {
+  populateCompareSelects();
+  document.querySelectorAll("#comp-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.tipo === compTipo));
+  renderCompareResult();
 }
-
-function computeRelGeral() {
-  const txs = relFilteredTx();
-  const entradas = txs.filter(t => t.type === "entrada").reduce((s,t) => s + t.value, 0);
-  const saidas = txs.filter(t => t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
-  document.getElementById("rel-entradas").textContent = fmtBRL(entradas);
-  document.getElementById("rel-saidas").textContent = fmtBRL(saidas);
-  const sobra = entradas - saidas;
-  document.getElementById("rel-resultado").textContent = fmtBRL(Math.abs(sobra));
-  document.getElementById("rel-res-label").textContent = sobra >= 0 ? "Sobrou" : "Faltou";
-  document.getElementById("rel-resultado").style.color = sobra >= 0 ? "var(--green)" : "var(--out)";
-  document.getElementById("rel-frase").textContent = txs.length
-    ? `Entrou ${fmtBRL(entradas)} e saiu ${fmtBRL(saidas)}. ${sobra >= 0 ? "Sobrou" : "Faltou"} ${fmtBRL(Math.abs(sobra))} no período.`
-    : "Nenhuma transação neste período.";
-
-  const ano = document.getElementById("rel-ano").value;
-  const allTx = state.transactions.filter(t => t.date.startsWith(ano));
-  const byMonth = {};
-  for (let m=0; m<12; m++) byMonth[m] = { entrada:0, saida:0 };
-  allTx.forEach(t => {
-    const m = parseInt(t.date.slice(5,7))-1;
-    if (t.type === "entrada") byMonth[m].entrada += t.value; else byMonth[m].saida += Math.abs(t.value);
-  });
-  const connected = [...new Set(txs.map(t => t.bank_id))].map(id => instInfo(id)).filter(i => i && i.name);
-  const el = document.getElementById("rel-por-banco");
-  el.innerHTML = connected.map(i => {
-    const val = txs.filter(t => t.bank_id === i.id && t.type === "saida").reduce((s,t) => s + Math.abs(t.value), 0);
-    return `<div class="bank-line-row"><span>${esc(i.name)}</span><span>${fmtBRL(val)}</span></div>`;
-  }).join("") || `<div class="empty-state">Nenhum banco conectado.</div>`;
-}
-
-function drawBarChart(canvasId, byMonth) {
-  const canvas = document.getElementById(canvasId);
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0,0,w,h);
-  const months = Object.keys(byMonth).map(Number);
-  const maxVal = Math.max(1, ...months.flatMap(m => [byMonth[m].entrada, byMonth[m].saida]));
-  const padding = 24;
-  const groupW = (w - padding) / 12;
-  const textSecondary = themeColor("--text-secondary") || "#6B7A90";
-  const greenColor = themeColor("--green") || "#16A34A";
-  const redColor = themeColor("--out") || "#E5484D";
-  ctx.font = "600 9px Inter, sans-serif";
-  ctx.fillStyle = textSecondary;
-  ctx.textAlign = "center";
-  months.forEach(m => {
-    const x = padding + m*groupW;
-    const barW = groupW/2 - 4;
-    const eH = (byMonth[m].entrada/maxVal) * (h - 44);
-    const sH = (byMonth[m].saida/maxVal) * (h - 44);
-    ctx.fillStyle = greenColor;
-    ctx.fillRect(x+2, h-20-eH, barW, eH);
-    ctx.fillStyle = redColor;
-    ctx.fillRect(x+2+barW+2, h-20-sH, barW, sH);
-    ctx.fillStyle = textSecondary;
-    ctx.fillText(MONTH_NAMES[m].slice(0,3), x+groupW/2, h-6);
-  });
-}
-
-function renderComparacao() {
+function renderCompareResult() {
   const m1 = document.getElementById("comp-mes1").value;
   const m2 = document.getElementById("comp-mes2").value;
-  const tipo = document.getElementById("comp-tipo").value;
-  const txs = state.transactions;
-  const v1 = txs.filter(t => t.date.slice(0,7) === m1 && t.type === tipo).reduce((s,t) => s + Math.abs(t.value), 0);
-  const v2 = txs.filter(t => t.date.slice(0,7) === m2 && t.type === tipo).reduce((s,t) => s + Math.abs(t.value), 0);
-  const diff = v2 - v1;
-  const pct = v1 ? ((diff/v1)*100).toFixed(0) : "0";
   const el = document.getElementById("comp-resultado");
-  el.classList.remove("hidden");
-  const verbo = tipo === "saida" ? "gastou" : "recebeu";
-  if (m1 === m2) { el.innerHTML = `<div class="empty-state">Escolha dois meses diferentes para comparar.</div>`; return; }
-  el.innerHTML = v1 === 0 && v2 === 0
-    ? `<div class="empty-state">Sem dados nesses dois meses.</div>`
-    : `<div class="comp-diff ${diff >= 0 ? "up" : "down"}">${fmtBRL(Math.abs(diff))} ${diff >= 0 ? "a mais" : "a menos"}</div>
-       <p class="rel-frase">Em ${monthLabel(m2)} você ${verbo} ${fmtBRL(v2)}. Em ${monthLabel(m1)} foram ${fmtBRL(v1)}${v1 ? ` (${Math.abs(pct)}% ${diff >= 0 ? "a mais" : "a menos"})` : ""}.</p>`;
+  if (!m1 || !m2 || m1 === m2) { el.innerHTML = `<div class="empty-state">Escolha dois meses diferentes para comparar.</div>`; return; }
+  const c1 = monthByCat(m1, compTipo), c2 = monthByCat(m2, compTipo);
+  const v1 = Object.values(c1).reduce((s, v) => s + v, 0);
+  const v2 = Object.values(c2).reduce((s, v) => s + v, 0);
+  if (!v1 && !v2) { el.innerHTML = `<div class="empty-state">Sem dados nesses dois meses.</div>`; return; }
+  const gasto = compTipo === "saida";
+  const diff = v2 - v1;
+  const good = gasto ? diff <= 0 : diff >= 0;
+  const pct = v1 ? Math.round(Math.abs(diff / v1) * 100) : null;
+  const max = Math.max(v1, v2, 1);
+  const verbo = gasto ? "gastou" : "recebeu";
+  const bars = [[m1, v1, "a"], [m2, v2, "b"]].map(([m, v, k]) => `<div class="cmp-bar-row">
+      <div class="cmp-bar-top"><span>${esc(monthLabel(m))}</span><b>${fmtBRL(v)}</b></div>
+      <div class="cmp-bar"><i class="${k}" style="width:${Math.max(v ? 3 : 0, (v / max) * 100).toFixed(1)}%"></i></div>
+    </div>`).join("");
+  const cats = [...new Set([...Object.keys(c1), ...Object.keys(c2)])]
+    .map(c => ({ c, a: c1[c] || 0, b: c2[c] || 0 }))
+    .map(x => ({ ...x, d: x.b - x.a }))
+    .sort((x, y) => Math.abs(y.d) - Math.abs(x.d))
+    .slice(0, 6);
+  const rows = cats.map(x => {
+    const info = catInfo(x.c);
+    const ok = gasto ? x.d <= 0 : x.d >= 0;
+    const sign = x.d > 0 ? "+" : x.d < 0 ? "−" : "";
+    return `<div class="cmp-cat" data-cat="${esc(x.c)}">
+      <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+      <div class="cmp-cat-main"><div class="cat-name">${esc(info.name)}</div><div class="cat-pct">${fmtBRL(x.a)} → ${fmtBRL(x.b)}</div></div>
+      <div class="cmp-delta ${x.d === 0 ? "" : ok ? "good" : "bad"}">${sign}${fmtBRL(Math.abs(x.d))}</div>
+    </div>`;
+  }).join("");
+  el.innerHTML = `<div class="comp-diff ${diff === 0 ? "" : good ? "good" : "bad"}">${diff === 0 ? "Sem diferença" : `${fmtBRL(Math.abs(diff))} ${diff > 0 ? "a mais" : "a menos"}`}</div>
+    <p class="rel-frase">Em ${esc(monthLabel(m2))} você ${verbo} ${fmtBRL(v2)}. Em ${esc(monthLabel(m1))} foram ${fmtBRL(v1)}${pct !== null && diff !== 0 ? ` (${pct}% ${diff > 0 ? "a mais" : "a menos"})` : ""}.</p>
+    <div class="cmp-bars">${bars}</div>
+    ${rows ? `<div class="cmp-cats-title">O que mais mudou</div>${rows}` : ""}`;
 }
 
 /* ============================================================
@@ -1627,7 +1743,7 @@ function openConfiguracoes() {
   document.getElementById("cfg-email").value = state.user?.email || "";
   document.getElementById("cfg-moeda").value = state.preferences.currency || "BRL";
   document.getElementById("cfg-modo-escuro").checked = document.documentElement.getAttribute("data-theme") === "dark";
-  renderAccentPicker(); renderNavEditor();
+  renderAccentPicker(); renderNavEditor(); loadBlockedNames();
   openModal("modal-configuracoes");
 }
 async function saveConfiguracoes() {
@@ -1986,6 +2102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("btn-confirmar-excluir-cartao")?.addEventListener("click", (e) => confirmDeleteCard(e.currentTarget));
     document.getElementById("cards-list").addEventListener("click", (e) => {
+      if (e.target.closest("[data-card-eye]")) { toggleCardInfo(); return; }
       const delBtn = e.target.closest("[data-card-del]");
       if (delBtn) { askDeleteCard(delBtn.dataset.cardDel); return; }
       const b = e.target.closest("[data-card-tx]");
@@ -2022,7 +2139,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const alterarBtn = e.target.closest("#btn-alterar-categoria");
       const excluirBtn = e.target.closest("#btn-excluir-tx");
       if (alterarBtn) openCategoriaModal(alterarBtn.dataset.txId);
-      if (excluirBtn) { if (confirm("Excluir esta transação?")) withLoading(excluirBtn, () => deleteTx(excluirBtn.dataset.txId)); }
+      if (excluirBtn) withLoading(excluirBtn, () => askDeleteTx(excluirBtn.dataset.txId).catch(e => showToast("Não foi possível excluir: " + e.message, { error: true })), { minMs: 0 });
     });
     document.getElementById("cat-grid").addEventListener("click", (e) => {
       const editBtn = e.target.closest("[data-edit-cat]");
@@ -2081,21 +2198,34 @@ document.addEventListener("DOMContentLoaded", () => {
   }, "nova categoria");
 
   wire(() => {
-    document.getElementById("rel-segmented").addEventListener("click", (e) => {
-      const btn = e.target.closest(".seg-btn");
-      if (!btn) return;
-      relSegment = btn.dataset.seg;
-      document.querySelectorAll("#rel-segmented .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
-      document.getElementById("rel-geral").classList.toggle("hidden", relSegment !== "geral");
-      document.getElementById("rel-comparar").classList.toggle("hidden", relSegment !== "comparar");
+    document.getElementById("cat-mode").addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn"); if (!btn) return;
+      catMode = btn.dataset.mode;
+      renderCategorias();
     });
-    ["rel-ano","rel-mes","rel-banco","rel-categoria"].forEach(id => {
-      document.getElementById(id).addEventListener("change", computeRelGeral);
+    document.getElementById("cat-prev").addEventListener("click", () => changeCatMonth(-1));
+    document.getElementById("cat-next").addEventListener("click", () => changeCatMonth(1));
+    document.getElementById("comp-tipo-seg").addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn"); if (!btn) return;
+      compTipo = btn.dataset.tipo;
+      document.querySelectorAll("#comp-tipo-seg .seg-btn").forEach(b => b.classList.toggle("active", b === btn));
+      renderCompareResult();
     });
-    document.getElementById("btn-comparar").addEventListener("click", renderComparacao);
-    ["comp-mes1","comp-mes2","comp-tipo"].forEach(id => document.getElementById(id).addEventListener("change", renderComparacao));
-    document.getElementById("rel-segmented").addEventListener("click", () => { if (relSegment === "comparar") renderComparacao(); });
-  }, "relatórios");
+    ["comp-mes1", "comp-mes2"].forEach(id => document.getElementById(id).addEventListener("change", renderCompareResult));
+    document.getElementById("comp-resultado").addEventListener("click", (e) => {
+      const row = e.target.closest("[data-cat]");
+      if (row) { catMonth = document.getElementById("comp-mes2").value || catMonth; catSegment = compTipo === "saida" ? "gastos" : "ganhos"; openCategoriaDetalhe(row.dataset.cat); }
+    });
+  }, "comparar meses");
+
+  wire(() => {
+    document.getElementById("btn-del-sim-all").addEventListener("click", (e) => confirmDeleteSimilar(true, e.currentTarget));
+    document.getElementById("btn-del-sim-one").addEventListener("click", (e) => confirmDeleteSimilar(false, e.currentTarget));
+    document.getElementById("blocked-list").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-unblock]");
+      if (b) unblockName(b.dataset.unblock, b);
+    });
+  }, "excluir parecidas");
 
   wire(async () => {
     const token = getToken();
