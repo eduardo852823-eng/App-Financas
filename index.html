@@ -269,10 +269,18 @@
           <div class="plan-summary-grid">
             <div class="plan-sum-card card-green"><span class="mini-label">Ganhos planejados</span><span class="mini-value" id="plan-sum-planejado">R$ 0,00</span></div>
             <div class="plan-sum-card card-red"><span class="mini-label">Gastos planejados</span><span class="mini-value" id="plan-sum-gasto">R$ 0,00</span></div>
-            <div class="plan-sum-card"><span class="mini-label">Já pago (líquido)</span><span class="mini-value" id="plan-sum-recebido">R$ 0,00</span></div>
-            <div class="plan-sum-card plan-sum-result" id="plan-sum-resta-card"><span class="mini-label" id="plan-sum-resta-label">Lucro do mês</span><span class="mini-value" id="plan-sum-resta">R$ 0,00</span></div>
           </div>
-          <div class="section-head"><h3>Itens do mês</h3><a href="#" class="link-small" id="btn-novo-planejado">+ Novo</a></div>
+          <div class="plan-result-banner" id="plan-sum-resta-card">
+            <span class="plan-result-label" id="plan-sum-resta-label">Lucro do mês</span>
+            <span class="plan-result-value" id="plan-sum-resta">R$ 0,00</span>
+          </div>
+          <div class="section-head">
+            <h3>Itens do mês</h3>
+            <button type="button" class="btn-novo-plan" id="btn-novo-planejado">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Novo
+            </button>
+          </div>
           <div id="plan-list"></div>
         </div>
 
@@ -417,6 +425,14 @@
         </div>
         <div class="month-check-grid" id="plan-meses-grid"></div>
         <p class="hint-inline" id="plan-meses-hint" style="margin-top:6px"></p>
+
+        <label id="plan-dia-label" style="margin-top:14px">Dia do mês <span class="hint-inline">(opcional)</span></label>
+        <div class="day-picker-row">
+          <button type="button" class="day-toggle-btn active" id="plan-dia-toggle-sem" data-dia-modo="sem">Sem dia definido</button>
+          <button type="button" class="day-toggle-btn" id="plan-dia-toggle-com" data-dia-modo="com">Escolher dia</button>
+        </div>
+        <div class="day-check-grid hidden" id="plan-dias-grid"></div>
+
         <div class="plan-error hidden" id="plan-error"></div>
         <button class="btn btn-primary" id="btn-salvar-planejado" style="margin-top:16px">Salvar</button>
       </div>

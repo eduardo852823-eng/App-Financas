@@ -1042,7 +1042,7 @@ function planItemRowHtml(p) {
       ${p.paid ? `<div class="plan-row-badge">${ICONS.check(12)} Pago</div>` : ""}
       <div class="plan-row-main">
         <div class="plan-row-name">${esc(p.name)}</div>
-        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado</div>
+        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado${p.day ? ` · dia ${p.day}` : ""}</div>
       </div>
       <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
       <div class="plan-row-actions">
@@ -1059,14 +1059,12 @@ function renderPlanFuturos() {
   // O planejamento é um mundo à parte: ignora completamente o saldo real da conta
   // (transações de verdade). Cada mês começa "zerado" e o resultado vem só do que
   // foi planejado (e do que já foi de fato marcado como pago) dentro da própria aba.
-  const items = planItemsCache.filter(p => p.month === planMonth).sort((a, b) => (a.paid - b.paid) || (a.id - b.id));
+  const items = planItemsCache.filter(p => p.month === planMonth).sort((a, b) => (a.paid - b.paid) || ((a.day || 99) - (b.day || 99)) || (a.id - b.id));
   const ganhoPlanejado = items.filter(p => p.type === "entrada").reduce((s, p) => s + p.value, 0);
   const gastoPlanejado = items.filter(p => p.type === "saida").reduce((s, p) => s + p.value, 0);
-  const jaPago = items.filter(p => p.paid).reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
   const resultado = ganhoPlanejado - gastoPlanejado;
   document.getElementById("plan-sum-planejado").textContent = fmtBRL(ganhoPlanejado);
   document.getElementById("plan-sum-gasto").textContent = fmtBRL(gastoPlanejado);
-  document.getElementById("plan-sum-recebido").textContent = fmtBRL(Math.abs(jaPago));
   const resEl = document.getElementById("plan-sum-resta");
   resEl.textContent = fmtBRL(Math.abs(resultado));
   const resCard = document.getElementById("plan-sum-resta-card");
@@ -1132,6 +1130,21 @@ function renderPlanMesesGrid() {
     ? `${n} mês${n > 1 ? "es" : ""} selecionado${n > 1 ? "s" : ""} — vai criar ${n} item${n > 1 ? "s" : ""} de ${fmtBRL(parseValorInput(document.getElementById("plan-valor").value) || 0)} cada.`
     : "Escolha um ou mais meses (pode trocar o ano com as setas).";
 }
+let planDiaSelecionado = null; // dia (1-31) escolhido no modal, ou null
+function renderPlanDiasGrid() {
+  const grid = document.getElementById("plan-dias-grid");
+  let html = "";
+  for (let d = 1; d <= 31; d++) {
+    html += `<button type="button" class="day-check ${planDiaSelecionado === d ? "active" : ""}" data-dia="${d}">${d}</button>`;
+  }
+  grid.innerHTML = html;
+}
+function setPlanDiaModo(modo) {
+  document.getElementById("plan-dia-toggle-sem").classList.toggle("active", modo === "sem");
+  document.getElementById("plan-dia-toggle-com").classList.toggle("active", modo === "com");
+  document.getElementById("plan-dias-grid").classList.toggle("hidden", modo !== "com");
+  if (modo === "sem") planDiaSelecionado = null;
+}
 function openPlanModal(id) {
   editingPlanId = id || null;
   const item = id ? planItemsCache.find(p => p.id === Number(id)) : null;
@@ -1154,6 +1167,10 @@ function openPlanModal(id) {
   document.getElementById("plan-mes-label").textContent = item ? "Mês em que esse gasto cai" : "Em quais meses isso vai acontecer";
   document.getElementById("plan-meses-hint").classList.toggle("hidden", !!item);
   renderPlanMesesGrid();
+
+  planDiaSelecionado = item && item.day ? Number(item.day) : null;
+  setPlanDiaModo(planDiaSelecionado ? "com" : "sem");
+  renderPlanDiasGrid();
 
   document.getElementById("plan-error").classList.add("hidden");
   openModal("modal-planejado");
@@ -1185,11 +1202,12 @@ async function savePlanejado() {
     errEl.classList.remove("hidden");
     return;
   }
+  const day = planDiaSelecionado || null;
   try {
     if (editingPlanId) {
-      await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: meses[0], category, subtitle } });
+      await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: meses[0], category, subtitle, day } });
     } else {
-      for (const month of meses) await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle } });
+      for (const month of meses) await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle, day } });
     }
     editingPlanId = null;
     closeAllModals();
@@ -2594,6 +2612,13 @@ document.addEventListener("DOMContentLoaded", () => {
       renderPlanMesesGrid();
     });
     document.getElementById("plan-valor").addEventListener("input", () => { if (!editingPlanId) renderPlanMesesGrid(); });
+    document.getElementById("plan-dia-toggle-sem").addEventListener("click", () => setPlanDiaModo("sem"));
+    document.getElementById("plan-dia-toggle-com").addEventListener("click", () => { setPlanDiaModo("com"); renderPlanDiasGrid(); });
+    document.getElementById("plan-dias-grid").addEventListener("click", (e) => {
+      const btn = e.target.closest(".day-check"); if (!btn) return;
+      planDiaSelecionado = Number(btn.dataset.dia);
+      renderPlanDiasGrid();
+    });
     document.getElementById("btn-salvar-planejado").addEventListener("click", (e) => withLoading(e.currentTarget, savePlanejado));
     document.getElementById("plan-list").addEventListener("click", (e) => {
       const row = e.target.closest("[data-plan-id]"); if (!row) return;

@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
   for (const stmt of [
     "ALTER TABLE planned_items ADD COLUMN category TEXT",
     "ALTER TABLE planned_items ADD COLUMN subtitle TEXT",
+    "ALTER TABLE planned_items ADD COLUMN day INTEGER",
   ]) {
     try { await db.execute(stmt); } catch (e) { /* já existe */ }
   }
@@ -969,29 +970,33 @@ app.get("/api/planned", auth, h(async (req, res) => {
   res.json(await all("SELECT * FROM planned_items WHERE user_id = ? ORDER BY month, created_at", [req.userId]));
 }));
 app.post("/api/planned", auth, h(async (req, res) => {
-  const { name, value, type, month, category, subtitle } = req.body;
+  const { name, value, type, month, category, subtitle, day } = req.body;
   if (!name || typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "Dê um nome para o planejado." });
   const v = Number(value);
   if (!v || v <= 0) return res.status(400).json({ error: "Valor inválido." });
   if (!["entrada", "saida"].includes(type)) return res.status(400).json({ error: "Tipo inválido." });
   if (!/^\d{4}-\d{2}$/.test(month || "")) return res.status(400).json({ error: "Mês inválido." });
+  const d = day === null || day === undefined || day === "" ? null : Number(day);
+  if (d !== null && (!Number.isInteger(d) || d < 1 || d > 31)) return res.status(400).json({ error: "Dia inválido." });
   const r = await run(
-    "INSERT INTO planned_items (user_id, name, value, type, month, category, subtitle) VALUES (?,?,?,?,?,?,?)",
-    [req.userId, name.trim(), v, type, month, category || null, subtitle || null]
+    "INSERT INTO planned_items (user_id, name, value, type, month, category, subtitle, day) VALUES (?,?,?,?,?,?,?,?)",
+    [req.userId, name.trim(), v, type, month, category || null, subtitle || null, d]
   );
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [r.lastInsertRowid]));
 }));
 app.put("/api/planned/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });
-  const { name, value, type, month, category, subtitle } = req.body;
+  const { name, value, type, month, category, subtitle, day } = req.body;
   const v = Number(value);
   if (!name || !name.trim() || !v || v <= 0 || !["entrada", "saida"].includes(type) || !/^\d{4}-\d{2}$/.test(month || "")) {
     return res.status(400).json({ error: "Dados inválidos." });
   }
+  const d = day === null || day === undefined || day === "" ? null : Number(day);
+  if (d !== null && (!Number.isInteger(d) || d < 1 || d > 31)) return res.status(400).json({ error: "Dia inválido." });
   await run(
-    "UPDATE planned_items SET name = ?, value = ?, type = ?, month = ?, category = ?, subtitle = ? WHERE id = ? AND user_id = ?",
-    [name.trim(), v, type, month, category || null, subtitle || null, item.id, req.userId]
+    "UPDATE planned_items SET name = ?, value = ?, type = ?, month = ?, category = ?, subtitle = ?, day = ? WHERE id = ? AND user_id = ?",
+    [name.trim(), v, type, month, category || null, subtitle || null, d, item.id, req.userId]
   );
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
 }));
