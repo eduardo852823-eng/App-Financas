@@ -408,14 +408,25 @@
           <button type="button" class="seg-btn" data-tipo="entrada">Ganho</button>
         </div>
         <label>Categoria</label>
-        <select id="plan-categoria"><option value="">Sem categoria</option></select>
+        <div class="cselect" id="plan-categoria-cselect">
+          <button type="button" class="cselect-trigger" id="plan-categoria-trigger">
+            <span class="cselect-current">Sem categoria</span>
+            <svg class="cselect-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="cselect-panel hidden" id="plan-categoria-panel"></div>
+        </div>
+        <select id="plan-categoria" class="hidden-native-select" tabindex="-1" aria-hidden="true"><option value="">Sem categoria</option></select>
+
         <label id="plan-subtitulo-label" class="hidden">Subtítulo <span class="hint-inline">(opcional)</span></label>
         <div class="hidden" id="plan-subtitulo-wrap">
-          <select id="plan-subtitulo"><option value="">Sem subtítulo</option></select>
-          <div class="subtitle-add-row">
-            <input type="text" id="plan-subtitulo-novo" placeholder="Criar novo subtítulo…" maxlength="40">
-            <button type="button" class="btn-outline" id="btn-add-subtitulo">+ Criar</button>
+          <div class="cselect" id="plan-subtitulo-cselect">
+            <button type="button" class="cselect-trigger" id="plan-subtitulo-trigger">
+              <span class="cselect-current">Sem subtítulo</span>
+              <svg class="cselect-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="cselect-panel hidden" id="plan-subtitulo-panel"></div>
           </div>
+          <select id="plan-subtitulo" class="hidden-native-select" tabindex="-1" aria-hidden="true"><option value="">Sem subtítulo</option></select>
         </div>
         <label id="plan-mes-label">Mês em que esse gasto cai</label>
         <div class="month-year-nav" id="plan-mes-year-nav">

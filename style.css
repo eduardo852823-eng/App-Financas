@@ -1219,22 +1219,22 @@ body{overscroll-behavior-y:none;}
 .meta-status{font-size:12.5px; font-weight:700; color:var(--green);}
 .meta-status.over{color:var(--out);}
 
-.month-check-grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:12px;}
-.month-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12.5px; padding:9px 4px; border-radius:12px; cursor:pointer; transition:all .16s ease;}
+.month-check-grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:10px;}
+.month-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:11.5px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:all .16s ease;}
 .month-check:hover{border-color:var(--blue);}
-.month-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 6px 14px rgba(var(--accent-rgb),0.3); animation:itemPop .2s ease both;}
+.month-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 4px 10px rgba(var(--accent-rgb),0.3); animation:itemPop .2s ease both;}
 .month-check:active{transform:scale(.9);}
 .month-check-grid.hidden{display:none;}
 
 .day-picker-row{display:flex; gap:8px; margin-top:10px;}
-.day-toggle-btn{flex:1; border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:13px; padding:10px 6px; border-radius:12px; cursor:pointer; transition:all .16s ease;}
+.day-toggle-btn{flex:1; border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12px; padding:8px 6px; border-radius:10px; cursor:pointer; transition:all .16s ease;}
 .day-toggle-btn:hover{border-color:var(--blue);}
-.day-toggle-btn.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 6px 14px rgba(var(--accent-rgb),0.3);}
-.day-check-grid{display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; margin-top:12px; animation:itemPop .25s ease both;}
+.day-toggle-btn.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 4px 10px rgba(var(--accent-rgb),0.3);}
+.day-check-grid{display:grid; grid-template-columns:repeat(7, 1fr); gap:5px; margin-top:10px; animation:itemPop .25s ease both;}
 .day-check-grid.hidden{display:none;}
-.day-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12.5px; padding:8px 2px; border-radius:10px; cursor:pointer; transition:all .14s ease;}
+.day-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:11px; padding:6px 2px; border-radius:8px; cursor:pointer; transition:all .14s ease;}
 .day-check:hover{border-color:var(--blue);}
-.day-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 4px 10px rgba(var(--accent-rgb),0.3); animation:itemPop .16s ease both;}
+.day-check.active{background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 3px 8px rgba(var(--accent-rgb),0.3); animation:itemPop .16s ease both;}
 .day-check:active{transform:scale(.88);}
 
 .hint-inline{font-size:11.5px; font-weight:600; color:var(--text-secondary);}
@@ -1251,4 +1251,68 @@ body{overscroll-behavior-y:none;}
 .plan-cat-head .cat-icon{width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;}
 .plan-cat-name{font-weight:800; font-size:13.5px; flex:1;}
 .plan-cat-total{font-size:13.5px; font-variant-numeric:tabular-nums;}
+
+/* ---------- dropdown customizado (categoria / subtítulo) ---------- */
+.hidden-native-select{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;}
+.cselect{position:relative;}
+.cselect-trigger{
+  width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:12px 14px; border-radius:var(--radius-sm); border:1.5px solid var(--gray-300);
+  font-size:15px; background:var(--bg-soft); color:var(--text-main); cursor:pointer; text-align:left;
+  transition:border-color .16s ease, box-shadow .16s ease;
+}
+.cselect-trigger:hover{border-color:var(--blue);}
+.cselect.open .cselect-trigger{border-color:var(--blue); box-shadow:0 0 0 3px rgba(var(--accent-rgb),0.15);}
+.cselect-current{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;}
+.cselect-chevron{flex-shrink:0; color:var(--text-secondary); transition:transform .2s ease;}
+.cselect.open .cselect-chevron{transform:rotate(180deg);}
+.cselect-panel{
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:40;
+  background:var(--card-bg); border-radius:var(--radius-md); box-shadow:0 14px 32px rgba(0,0,0,.18);
+  border:1px solid var(--gray-200); padding:8px; transform-origin:top center;
+  opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none; transition:opacity .16s ease, transform .16s ease;
+}
+.cselect-panel.hidden{display:block;}
+.cselect-panel.open{opacity:1; transform:translateY(0) scale(1); pointer-events:auto;}
+.cselect-scroll{max-height:220px; overflow-y:auto;}
+.cselect-option{
+  width:100%; display:flex; align-items:center; gap:10px; text-align:left; background:none; border:none;
+  padding:9px 8px; border-radius:10px; font-size:14px; font-weight:600; color:var(--text-main); cursor:pointer;
+  transition:background .12s ease;
+}
+.cselect-option:hover{background:var(--gray-100);}
+.cselect-option.active{background:var(--blue-bg,rgba(var(--accent-rgb),0.1)); color:var(--blue);}
+.cselect-option.active svg{margin-left:auto; flex-shrink:0; color:var(--blue);}
+.cselect-opt-icon{width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; flex-shrink:0;}
+.cselect-opt-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.cselect-divider{height:1px; background:var(--gray-200); margin:6px 4px;}
+.cselect-add-row{display:flex; gap:6px; padding:4px;}
+.cselect-add-row input{flex:1; margin:0; padding:9px 10px; border-radius:10px; border:1.5px solid var(--gray-300); font-size:13.5px; background:var(--bg-soft);}
+.cselect-add-btn{
+  flex-shrink:0; width:36px; height:36px; border-radius:10px; border:none; background:var(--blue); color:#fff;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; transition:filter .14s ease, transform .14s ease;
+}
+.cselect-add-btn:hover{filter:brightness(1.08);}
+.cselect-add-btn:active{transform:scale(.9);}
+
+/* ---------- transição ao trocar de mês no planejamento ---------- */
+.plan-slide{animation:planSlideIn .32s cubic-bezier(.16,1,.3,1);}
+@keyframes planSlideIn{
+  from{opacity:0; transform:translateX(var(--slide-dir, 14px));}
+  to{opacity:1; transform:translateX(0);}
+}
+
+/* ---------- metas por categoria: expandir subtítulos ---------- */
+.meta-row-set{cursor:default;}
+.meta-sub-toggle{
+  display:flex; align-items:center; gap:6px; background:none; border:none; padding:6px 2px 0;
+  font-size:12px; font-weight:700; color:var(--blue); cursor:pointer;
+}
+.meta-sub-toggle svg{transition:transform .2s ease;}
+.meta-sub-toggle.open svg{transform:rotate(180deg);}
+.meta-sub-list{max-height:0; overflow:hidden; transition:max-height .25s ease;}
+.meta-sub-list.open{max-height:400px;}
+.meta-sub-row{display:flex; align-items:center; justify-content:space-between; padding:8px 4px 8px 12px; font-size:13px; border-top:1px dashed var(--gray-200);}
+.meta-sub-row-name{color:var(--text-secondary); font-weight:600;}
+.meta-sub-row-val{font-weight:800; font-variant-numeric:tabular-nums;}
 .plan-subtitle-head{display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; color:var(--text-secondary); padding:6px 4px 4px 14px;}
