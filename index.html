@@ -428,21 +428,36 @@
           </div>
           <select id="plan-subtitulo" class="hidden-native-select" tabindex="-1" aria-hidden="true"><option value="">Sem subtítulo</option></select>
         </div>
-        <label id="plan-mes-label">Mês em que esse gasto cai</label>
-        <div class="month-year-nav" id="plan-mes-year-nav">
-          <button type="button" class="month-arrow" id="plan-mes-year-prev">‹</button>
-          <div class="month-year-label" id="plan-mes-year-label">2026</div>
-          <button type="button" class="month-arrow" id="plan-mes-year-next">›</button>
+        <label id="plan-mes-label">Quando</label>
+        <div class="wheel-row">
+          <div class="wheel-wrap">
+            <div class="wheel-col" id="wheel-dia"></div>
+            <div class="wheel-highlight-line"></div>
+          </div>
+          <div class="wheel-wrap wheel-wrap-wide">
+            <div class="wheel-col" id="wheel-mes"></div>
+            <div class="wheel-highlight-line"></div>
+          </div>
+          <div class="wheel-wrap">
+            <div class="wheel-col" id="wheel-ano"></div>
+            <div class="wheel-highlight-line"></div>
+          </div>
         </div>
-        <div class="month-check-grid" id="plan-meses-grid"></div>
-        <p class="hint-inline" id="plan-meses-hint" style="margin-top:6px"></p>
+        <div class="wheel-caption-row"><span>Dia</span><span>Mês</span><span>Ano</span></div>
 
-        <label id="plan-dia-label" style="margin-top:14px">Dia do mês <span class="hint-inline">(opcional)</span></label>
-        <div class="day-picker-row">
-          <button type="button" class="day-toggle-btn active" id="plan-dia-toggle-sem" data-dia-modo="sem">Sem dia definido</button>
-          <button type="button" class="day-toggle-btn" id="plan-dia-toggle-com" data-dia-modo="com">Escolher dia</button>
+        <div id="plan-varios-wrap">
+          <label class="plan-checkbox-row">
+            <input type="checkbox" id="plan-varios-meses-check">
+            <span>Vários meses <span class="hint-inline">(repete esse gasto todo mês, a partir do mês acima)</span></span>
+          </label>
+          <div class="plan-qtd-row hidden" id="plan-qtd-row">
+            <span class="plan-qtd-label">Repetir por</span>
+            <button type="button" class="qtd-btn" id="plan-qtd-minus" aria-label="Menos meses">−</button>
+            <span class="qtd-value" id="plan-qtd-value">2</span>
+            <button type="button" class="qtd-btn" id="plan-qtd-plus" aria-label="Mais meses">+</button>
+            <span class="plan-qtd-label">meses</span>
+          </div>
         </div>
-        <div class="day-check-grid hidden" id="plan-dias-grid"></div>
 
         <div class="plan-error hidden" id="plan-error"></div>
         <button class="btn btn-primary" id="btn-salvar-planejado" style="margin-top:16px">Salvar</button>

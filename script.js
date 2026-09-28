@@ -1104,7 +1104,6 @@ function renderPlanFuturos() {
 function changePlanMonth(delta) {
   planMonth = shiftYm(planMonth || curYm(), delta);
   const wrap = document.getElementById("plan-futuros");
-  wrap.style.setProperty("--slide-dir", delta > 0 ? "14px" : "-14px");
   wrap.classList.remove("plan-slide");
   void wrap.offsetWidth;
   wrap.classList.add("plan-slide");
@@ -1156,9 +1155,46 @@ function renderSubtituloCSelect(selected, opts) {
   document.querySelector("#plan-subtitulo-trigger .cselect-current").textContent = selected || "Sem subtítulo";
 }
 
-/* ---------- modal de novo/editar gasto futuro (categoria + subtítulo + vários meses de uma vez) ---------- */
-let planModalYear = null;      // ano sendo exibido na grade de meses do modal
-let planModalSelected = new Set(); // meses marcados ("AAAA-MM"), acumula entre trocas de ano
+/* ---------- modal de novo/editar gasto futuro (categoria + subtítulo + data por rolinho) ---------- */
+const WHEEL_ITEM_H = 36;
+function attachWheel(containerId, items, initialValue, onChange) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = `<div class="wheel-spacer"></div>` + items.map(it => `<div class="wheel-item" data-val="${esc(String(it.value))}">${esc(it.label)}</div>`).join("") + `<div class="wheel-spacer"></div>`;
+  const nodes = () => Array.from(el.querySelectorAll(".wheel-item"));
+  const setActive = (idx) => nodes().forEach((n, i) => n.classList.toggle("active", i === idx));
+  const clampIdx = (idx) => Math.min(items.length - 1, Math.max(0, idx));
+  let initIdx = clampIdx(items.findIndex(it => String(it.value) === String(initialValue)));
+  if (initIdx < 0) initIdx = 0;
+  requestAnimationFrame(() => { el.scrollTop = initIdx * WHEEL_ITEM_H; setActive(initIdx); });
+  let t = null;
+  el.addEventListener("scroll", () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const idx = clampIdx(Math.round(el.scrollTop / WHEEL_ITEM_H));
+      el.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: "smooth" });
+      setActive(idx);
+      onChange(items[idx].value);
+    }, 110);
+  });
+  el.addEventListener("click", (e) => {
+    const item = e.target.closest(".wheel-item"); if (!item) return;
+    const idx = nodes().indexOf(item);
+    el.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: "smooth" });
+  });
+}
+let planWheelDay = null, planWheelMonthNum = null, planWheelYearNum = null;
+let planVariosMeses = false, planQtdMeses = 2;
+function setupPlanWheels(baseYear, baseMonthNum, baseDay) {
+  planWheelDay = baseDay || null;
+  planWheelMonthNum = baseMonthNum;
+  planWheelYearNum = baseYear;
+  const diaItems = [{ value: "", label: "Sem dia" }, ...Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: String(i + 1) }))];
+  attachWheel("wheel-dia", diaItems, baseDay || "", v => { planWheelDay = v || null; });
+  const mesItems = MES_ABREV.map((m, i) => ({ value: i + 1, label: m }));
+  attachWheel("wheel-mes", mesItems, baseMonthNum, v => { planWheelMonthNum = v; });
+  const anoItems = Array.from({ length: 14 }, (_, i) => baseYear - 4 + i).map(y => ({ value: y, label: String(y) }));
+  attachWheel("wheel-ano", anoItems, baseYear, v => { planWheelYearNum = v; });
+}
 function refreshSubtitleOptions() {
   const catId = document.getElementById("plan-categoria").value;
   const wrap = document.getElementById("plan-subtitulo-wrap");
@@ -1172,33 +1208,6 @@ function refreshSubtitleOptions() {
   const keep = opts.some(s => s.name === current) ? current : "";
   sel.value = keep;
   renderSubtituloCSelect(keep, opts);
-}
-function renderPlanMesesGrid() {
-  document.getElementById("plan-mes-year-label").textContent = planModalYear;
-  const grid = document.getElementById("plan-meses-grid");
-  grid.innerHTML = MES_ABREV.map((label, i) => {
-    const ym = `${planModalYear}-${String(i + 1).padStart(2, "0")}`;
-    return `<button type="button" class="month-check ${planModalSelected.has(ym) ? "active" : ""}" data-mes="${ym}">${label}</button>`;
-  }).join("");
-  const n = planModalSelected.size;
-  document.getElementById("plan-meses-hint").textContent = n
-    ? `${n} mês${n > 1 ? "es" : ""} selecionado${n > 1 ? "s" : ""} — vai criar ${n} item${n > 1 ? "s" : ""} de ${fmtBRL(parseValorInput(document.getElementById("plan-valor").value) || 0)} cada.`
-    : "Escolha um ou mais meses (pode trocar o ano com as setas).";
-}
-let planDiaSelecionado = null; // dia (1-31) escolhido no modal, ou null
-function renderPlanDiasGrid() {
-  const grid = document.getElementById("plan-dias-grid");
-  let html = "";
-  for (let d = 1; d <= 31; d++) {
-    html += `<button type="button" class="day-check ${planDiaSelecionado === d ? "active" : ""}" data-dia="${d}">${d}</button>`;
-  }
-  grid.innerHTML = html;
-}
-function setPlanDiaModo(modo) {
-  document.getElementById("plan-dia-toggle-sem").classList.toggle("active", modo === "sem");
-  document.getElementById("plan-dia-toggle-com").classList.toggle("active", modo === "com");
-  document.getElementById("plan-dias-grid").classList.toggle("hidden", modo !== "com");
-  if (modo === "sem") planDiaSelecionado = null;
 }
 function openPlanModal(id) {
   editingPlanId = id || null;
@@ -1218,18 +1227,17 @@ function openPlanModal(id) {
     document.getElementById("plan-subtitulo").value = item.subtitle;
     refreshSubtitleOptions();
   }
-  document.getElementById("plan-subtitulo-novo").value = "";
 
   const baseMonth = item ? item.month : (planMonth || curYm());
-  planModalYear = baseMonth.slice(0, 4);
-  planModalSelected = new Set([baseMonth].filter(() => item)); // editando: só o mês do item; novo: começa vazio
-  document.getElementById("plan-mes-label").textContent = item ? "Mês em que esse gasto cai" : "Em quais meses isso vai acontecer";
-  document.getElementById("plan-meses-hint").classList.toggle("hidden", !!item);
-  renderPlanMesesGrid();
+  const [baseYear, baseMonthNum] = baseMonth.split("-").map(Number);
+  setupPlanWheels(baseYear, baseMonthNum, item && item.day ? Number(item.day) : "");
 
-  planDiaSelecionado = item && item.day ? Number(item.day) : null;
-  setPlanDiaModo(planDiaSelecionado ? "com" : "sem");
-  renderPlanDiasGrid();
+  planVariosMeses = false;
+  planQtdMeses = 2;
+  document.getElementById("plan-varios-meses-check").checked = false;
+  document.getElementById("plan-qtd-row").classList.add("hidden");
+  document.getElementById("plan-qtd-value").textContent = "2";
+  document.getElementById("plan-varios-wrap").classList.toggle("hidden", !!item);
 
   document.getElementById("plan-error").classList.add("hidden");
   openModal("modal-planejado");
@@ -1256,16 +1264,18 @@ async function savePlanejado() {
   const subtitle = category ? (document.getElementById("plan-subtitulo").value || null) : null;
   const errEl = document.getElementById("plan-error");
   errEl.classList.add("hidden");
-  const meses = Array.from(planModalSelected);
-  if (!name || !value || value <= 0 || !meses.length) {
-    errEl.textContent = "Preencha a descrição, o valor e escolha ao menos um mês.";
+  if (!name || !value || value <= 0 || !planWheelYearNum || !planWheelMonthNum) {
+    errEl.textContent = "Preencha a descrição, o valor e escolha o mês.";
     errEl.classList.remove("hidden");
     return;
   }
-  const day = planDiaSelecionado || null;
+  const baseMonth = `${planWheelYearNum}-${String(planWheelMonthNum).padStart(2, "0")}`;
+  const qtd = (!editingPlanId && planVariosMeses) ? Math.max(1, planQtdMeses) : 1;
+  const meses = Array.from({ length: qtd }, (_, i) => shiftYm(baseMonth, i));
+  const day = planWheelDay || null;
   try {
     if (editingPlanId) {
-      await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: meses[0], category, subtitle, day } });
+      await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: baseMonth, category, subtitle, day } });
     } else {
       for (const month of meses) await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle, day } });
     }
@@ -1273,7 +1283,7 @@ async function savePlanejado() {
     closeAllModals();
     planMonth = meses[meses.length - 1];
     renderPlanejamento();
-    showToast(meses.length > 1 ? `${meses.length} itens criados.` : "Item salvo.");
+    showToast(meses.length > 1 ? `${meses.length} itens criados (um por mês).` : "Item salvo.");
   } catch (e) {
     errEl.textContent = e.message || "Não foi possível salvar.";
     errEl.classList.remove("hidden");
@@ -1324,41 +1334,36 @@ function goalFor(category, month) {
     || goalsCache.find(g => g.category === category && g.month === null)
     || null;
 }
-function metaSubtitlesHtml(catId, ym) {
+function metaSubtitlesHtml(catId, catItems) {
   const subs = subtitlesCache.filter(s => s.category === catId);
-  if (!subs.length) return "";
-  const rows = subs.map(s => {
-    const total = planItemsCache
-      .filter(p => p.category === catId && p.subtitle === s.name && p.month === ym && p.paid)
-      .reduce((sum, p) => sum + (p.type === "entrada" ? p.value : -p.value), 0);
-    return `<div class="meta-sub-row"><span class="meta-sub-row-name">${esc(s.name)}</span><span class="meta-sub-row-val">${fmtBRL(Math.abs(total))}</span></div>`;
-  }).join("");
+  const sum = (arr) => arr.reduce((t, p) => t + p.value, 0);
+  const semSub = sum(catItems.filter(p => !p.subtitle || !subs.some(s => s.name === p.subtitle)));
+  const rows = subs.map(s => `<div class="meta-sub-row"><span class="meta-sub-row-name">${esc(s.name)}</span><span class="meta-sub-row-val">${fmtBRL(sum(catItems.filter(p => p.subtitle === s.name)))}</span></div>`);
+  if (semSub > 0) rows.push(`<div class="meta-sub-row"><span class="meta-sub-row-name">Sem subtítulo</span><span class="meta-sub-row-val">${fmtBRL(semSub)}</span></div>`);
+  if (!rows.length) return "";
   return `
     <button type="button" class="meta-sub-toggle" data-sub-toggle="${esc(catId)}">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-      ${subs.length} subtítulo${subs.length > 1 ? "s" : ""} — ver gasto (planejado, marcado como pago)
+      Ver por subtítulo
     </button>
-    <div class="meta-sub-list" id="meta-sub-list-${esc(catId)}">${rows}</div>`;
+    <div class="meta-sub-list" id="meta-sub-list-${esc(catId)}">${rows.join("")}</div>`;
 }
 function renderMetas() {
-  const ym = planMonth || curYm();
+  const ym = curYm(); // só o mês atual
   const cats = allCategories().filter(c => c.id !== "salario" && c.id !== "nao_identificada");
-  const gastoByCat = {};
-  state.transactions.filter(t => t.date.slice(0, 7) === ym && t.type === "saida").forEach(t => {
-    const c = effectiveCategory(t);
-    gastoByCat[c] = (gastoByCat[c] || 0) + Math.abs(t.value);
-  });
   const el = document.getElementById("metas-list");
   el.innerHTML = cats.map(c => {
     const goal = goalFor(c.id, ym);
-    const gasto = gastoByCat[c.id] || 0;
+    const catItems = planItemsCache.filter(p => p.category === c.id && p.month === ym && p.paid && p.type === "saida");
+    const gasto = catItems.reduce((t, p) => t + p.value, 0);
+    const subs = metaSubtitlesHtml(c.id, catItems);
     if (!goal) {
       return `<div class="meta-row" data-cat="${esc(c.id)}">
         <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
         <div class="meta-row-main">
           <div class="cat-name">${esc(c.name)}</div>
           <div class="cat-pct">${fmtBRL(gasto)} gastos em ${esc(monthLabel(ym))}</div>
-          ${metaSubtitlesHtml(c.id, ym)}
+          ${subs}
         </div>
         <button type="button" class="btn-link-small" data-meta-def="${esc(c.id)}">Definir meta</button>
       </div>`;
@@ -1376,7 +1381,7 @@ function renderMetas() {
       </div>
       <div class="cat-bar meta-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%;background:${over ? "var(--out)" : c.color}"></i></div>
       <div class="meta-status ${over ? "over" : ""}">${over ? "Passou " + fmtBRL(Math.abs(diff)) : "Resta " + fmtBRL(diff)}</div>
-      ${metaSubtitlesHtml(c.id, ym)}
+      ${subs}
     </div>`;
   }).join("");
 }
@@ -2694,26 +2699,17 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("plan-subtitulo-panel").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target.id === "plan-subtitulo-novo") { e.preventDefault(); addSubtituloInline(); }
     });
-    document.getElementById("plan-mes-year-prev").addEventListener("click", () => { planModalYear = String(Number(planModalYear) - 1); renderPlanMesesGrid(); });
-    document.getElementById("plan-mes-year-next").addEventListener("click", () => { planModalYear = String(Number(planModalYear) + 1); renderPlanMesesGrid(); });
-    document.getElementById("plan-meses-grid").addEventListener("click", (e) => {
-      const b = e.target.closest(".month-check"); if (!b) return;
-      const ym = b.dataset.mes;
-      if (editingPlanId) {
-        // editando um item já existente: só um mês por vez (radio)
-        planModalSelected = new Set([ym]);
-      } else {
-        if (planModalSelected.has(ym)) planModalSelected.delete(ym); else planModalSelected.add(ym);
-      }
-      renderPlanMesesGrid();
+    document.getElementById("plan-varios-meses-check").addEventListener("change", (e) => {
+      planVariosMeses = e.target.checked;
+      document.getElementById("plan-qtd-row").classList.toggle("hidden", !planVariosMeses);
     });
-    document.getElementById("plan-valor").addEventListener("input", () => { if (!editingPlanId) renderPlanMesesGrid(); });
-    document.getElementById("plan-dia-toggle-sem").addEventListener("click", () => setPlanDiaModo("sem"));
-    document.getElementById("plan-dia-toggle-com").addEventListener("click", () => { setPlanDiaModo("com"); renderPlanDiasGrid(); });
-    document.getElementById("plan-dias-grid").addEventListener("click", (e) => {
-      const btn = e.target.closest(".day-check"); if (!btn) return;
-      planDiaSelecionado = Number(btn.dataset.dia);
-      renderPlanDiasGrid();
+    document.getElementById("plan-qtd-minus").addEventListener("click", () => {
+      planQtdMeses = Math.max(1, planQtdMeses - 1);
+      document.getElementById("plan-qtd-value").textContent = planQtdMeses;
+    });
+    document.getElementById("plan-qtd-plus").addEventListener("click", () => {
+      planQtdMeses = Math.min(36, planQtdMeses + 1);
+      document.getElementById("plan-qtd-value").textContent = planQtdMeses;
     });
     document.getElementById("btn-salvar-planejado").addEventListener("click", (e) => withLoading(e.currentTarget, savePlanejado));
     document.getElementById("plan-list").addEventListener("click", (e) => {
