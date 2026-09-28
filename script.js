@@ -589,7 +589,7 @@ const TX_PERIODS = [
   { id: "7d", label: "Última semana" },
   { id: "15d", label: "Últimos 15 dias" },
   { id: "30d", label: "Últimos 30 dias" },
-  { id: "month", label: "Este mês" },
+  { id: "month", label: "Mês atual" },
   { id: "lastmonth", label: "Mês passado" },
   { id: "90d", label: "Últimos 3 meses" }
 ];
@@ -628,7 +628,7 @@ function populateDashboardFilters() {
   const months = getAvailableMonths();
   const periodoSel = document.getElementById("filter-periodo");
   periodoSel.innerHTML = `<option value="all">Todo o período</option>` +
-    months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("");
+    months.map(m => `<option value="${m}">${monthOptionLabel(m)}</option>`).join("");
   periodoSel.value = dashFilterPeriodo;
 
   const bancoSel = document.getElementById("filter-banco");
@@ -642,10 +642,8 @@ function monthLabel(ym) {
   const [y,m] = ym.split("-");
   return `${MONTH_NAMES[parseInt(m)-1]} ${y}`;
 }
-function monthLabelWithTag(ym) {
-  const label = monthLabel(ym);
-  return ym === curYm() ? `${label} <span class="month-current-tag">mês atual</span>` : label;
-}
+function monthOptionLabel(ym) { return ym === curYm() ? `${monthLabel(ym)} — Mês atual` : monthLabel(ym); }
+function monthLabelWithTag(ym) { return monthOptionLabel(ym); }
 
 function renderDashboard() {
   populateDashboardFilters();
@@ -1363,13 +1361,13 @@ function renderMetas() {
   const cats = allCategories().filter(c => c.id !== "salario" && c.id !== "nao_identificada");
   const el = document.getElementById("metas-list");
   el.innerHTML = cats.map((c, i) => {
-    const delay = `style="animation-delay:${(i * 0.06).toFixed(3)}s"`;
+    const styleAttr = `style="--cat-color:${c.color}; animation-delay:${(i * 0.06).toFixed(3)}s"`;
     const goal = goalFor(c.id, ym);
     const catItems = planItemsCache.filter(p => p.category === c.id && p.month === ym && p.type === "saida");
     const gasto = catItems.reduce((t, p) => t + p.value, 0);
     const subs = metaSubtitlesHtml(c.id, catItems);
     if (!goal) {
-      return `<div class="meta-row" ${delay} data-cat="${esc(c.id)}">
+      return `<div class="meta-row" ${styleAttr} data-cat="${esc(c.id)}">
         <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
         <div class="meta-row-main">
           <div class="cat-name">${esc(c.name)}</div>
@@ -1382,7 +1380,7 @@ function renderMetas() {
     const diff = goal.value - gasto;
     const pct = Math.min(100, (gasto / goal.value) * 100);
     const over = gasto > goal.value;
-    return `<div class="meta-row meta-row-set" ${delay} data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
+    return `<div class="meta-row meta-row-set" ${styleAttr} data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
       <div class="meta-row-top">
         <div class="meta-row-head">
           <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
@@ -1404,9 +1402,10 @@ function specificGoalsFor(category, year) {
 function renderMesesGrid(category, year) {
   const set = new Set(specificGoalsFor(category, year).map(g => g.month));
   const grid = document.getElementById("meta-meses-grid");
+  const curM = curYm();
   grid.innerHTML = MES_ABREV.map((label, i) => {
     const ym = `${year}-${String(i + 1).padStart(2, "0")}`;
-    return `<button type="button" class="month-check ${set.has(ym) ? "active" : ""}" data-mes="${ym}">${label}</button>`;
+    return `<button type="button" class="month-check ${set.has(ym) ? "active" : ""} ${ym === curM ? "is-current" : ""}" data-mes="${ym}">${label}</button>`;
   }).join("");
 }
 function openMetaModal(catId) {
@@ -2031,7 +2030,7 @@ function populateCompareSelects() {
   if (!months.includes(cur)) months.unshift(cur);
   const c1 = document.getElementById("comp-mes1"), c2 = document.getElementById("comp-mes2");
   const p1 = c1.value, p2 = c2.value;
-  const opts = months.map(m => `<option value="${m}">${esc(monthLabel(m))}</option>`).join("");
+  const opts = months.map(m => `<option value="${m}">${esc(monthOptionLabel(m))}</option>`).join("");
   c1.innerHTML = opts; c2.innerHTML = opts;
   c1.value = months.includes(p1) ? p1 : (months[1] || months[0]);
   c2.value = months.includes(p2) ? p2 : months[0];
