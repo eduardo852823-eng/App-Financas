@@ -70,11 +70,57 @@ const ICONS = {
   list:   (s) => ICON('<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>', s),
   check:  (s) => ICON('<path d="M5 12l4 4 10-10"/>', s),
   refresh:(s) => ICON('<path d="M20 11a8 8 0 00-14.5-4M4 5v4h4M4 13a8 8 0 0014.5 4M20 19v-4h-4"/>', s),
-  chevron:(s) => ICON('<path d="M9 6l6 6-6 6"/>', s)
+  chevron:(s) => ICON('<path d="M9 6l6 6-6 6"/>', s),
+  arrowDown:(s) => ICON('<path d="M12 5v14M6 13l6 6 6-6"/>', s),
+  arrowUp:(s) => ICON('<path d="M12 19V5M6 11l6-6 6 6"/>', s),
+  clock:  (s) => ICON('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', s),
+  tag:    (s) => ICON('<path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z"/><circle cx="7.5" cy="7.5" r="1"/>', s)
 };
 function initials(name) { return esc(String(name || "").split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()); }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+const REDUCE_MOTION = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+// Só troca o conteúdo de um <select> se as opções mudaram (antes recriava tudo a cada tela desenhada)
+function setSelect(sel, html, value) {
+  if (!sel) return;
+  if (sel.dataset.sig !== html) { sel.innerHTML = html; sel.dataset.sig = html; }
+  if (sel.value !== value) sel.value = value;
+}
+// Valor que "conta" até o número novo (respeita valores escondidos e "reduzir movimento")
+function countTo(el, to, { fmt = fmtBRL, html = false, ms = 650 } = {}) {
+  if (!el) return;
+  const prop = html ? "innerHTML" : "textContent";
+  const from = el.dataset.v === undefined ? 0 : Number(el.dataset.v);
+  el.dataset.v = String(to);
+  cancelAnimationFrame(el._raf);
+  if (valuesHidden() || REDUCE_MOTION || !isFinite(from) || from === to) { el[prop] = fmt(to); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / ms);
+    el[prop] = fmt(t < 1 ? from + (to - from) * easeOutCubic(t) : to);
+    if (t < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+// Ordenação por valor: um botão só que alterna Mais recentes → Maior valor → Menor valor
+const SORT_CYCLE = ["recent", "high", "low"];
+const SORT_LABEL = { recent: "Mais recentes", high: "Maior valor", low: "Menor valor" };
+function sortTxs(list, mode) {
+  const a = list.slice();
+  if (mode === "high") return a.sort((x, y) => Math.abs(y.value) - Math.abs(x.value) || y.date.localeCompare(x.date));
+  if (mode === "low") return a.sort((x, y) => Math.abs(x.value) - Math.abs(y.value) || y.date.localeCompare(x.date));
+  return a.sort((x, y) => y.date.localeCompare(x.date) || (Number(y.id) - Number(x.id)));
+}
+function sortBtnHtml(key) {
+  const m = sortMode[key];
+  const icon = m === "high" ? ICONS.arrowDown(15) : m === "low" ? ICONS.arrowUp(15) : ICONS.clock(15);
+  return `<div class="sort-row"><button type="button" class="sort-btn${m === "recent" ? "" : " active"}" data-sort="${key}" aria-label="Ordenação: ${SORT_LABEL[m]}. Toque para alternar">${icon}<span>${SORT_LABEL[m]}</span></button></div>`;
+}
+function renderSortSlot(id, key) {
+  const slot = document.getElementById(id); if (!slot) return;
+  if (slot.dataset.m !== sortMode[key]) { slot.innerHTML = sortBtnHtml(key); slot.dataset.m = sortMode[key]; }
+}
 // O banco grava datas em UTC sem fuso ("2026-09-21 19:00:58"); sem isso o navegador lê como horário local e mostra 3h a mais
 function parseDbDate(str) {
   if (!str) return null;
@@ -91,12 +137,11 @@ function fmtDate(str) {
 /* ============================================================
    FEEDBACK DE CARREGAMENTO (bolinhas girando)
    ============================================================ */
-const SPINNER_DOTS = "<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>";
-const SPINNER_SM = `<span class="dots-spinner sm" aria-hidden="true">${SPINNER_DOTS}</span>`;
-const MIN_BTN_SPIN_MS = 500;
-const SCREEN_LOADER_MS = 450;
+const SPINNER_SM = `<span class="ring-spinner" aria-hidden="true"></span>`;
+const MIN_BTN_SPIN_MS = 300;
+const DATA_TTL_MS = 60000; // dados em memória valem 1 minuto antes de buscar de novo no servidor
 
-// Mostra as bolinhas no botão enquanto a ação roda (mínimo de 0,5 s, mesmo se for instantânea) e bloqueia clique duplo.
+// Mostra um anel girando no botão enquanto a ação roda (mínimo de 0,3 s) e bloqueia clique duplo.
 async function withLoading(btn, fn, { minMs = MIN_BTN_SPIN_MS } = {}) {
   if (!btn) return fn();
   if (btn.dataset.loading === "1") return;
@@ -115,14 +160,18 @@ async function withLoading(btn, fn, { minMs = MIN_BTN_SPIN_MS } = {}) {
     delete btn.dataset.loading;
   }
 }
-// As bolinhas nunca ficam girando para sempre: se algo travar, elas somem sozinhas depois de 50 s.
+// A barrinha de carregamento nunca fica para sempre: se algo travar, some sozinha depois de 20 s.
 let loaderWatchdog = null;
+let loaderCount = 0;
 function showScreenLoader() {
+  loaderCount++;
   document.getElementById("screen-loader")?.classList.add("show");
   clearTimeout(loaderWatchdog);
-  loaderWatchdog = setTimeout(hideScreenLoader, 50000);
+  loaderWatchdog = setTimeout(() => hideScreenLoader(true), 20000);
 }
-function hideScreenLoader() {
+function hideScreenLoader(force) {
+  loaderCount = force ? 0 : Math.max(0, loaderCount - 1);
+  if (loaderCount > 0) return;
   clearTimeout(loaderWatchdog);
   document.getElementById("screen-loader")?.classList.remove("show");
 }
@@ -159,7 +208,7 @@ async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS } = {}
   try { data = await res.json(); } catch (e) { /* sem corpo */ }
   if (res.status === 401 && token && !path.startsWith("/auth/")) {
     // sessão expirou: volta para o login em vez de deixar o app "travado"
-    clearToken(); state.user = null; hideScreenLoader(); showLogin();
+    clearToken(); state.user = null; hideScreenLoader(true); showLogin();
     throw new Error("Sessão expirada. Entre novamente.");
   }
   if (!res.ok) throw new Error((data && data.error) || "Erro de conexão com o servidor");
@@ -222,6 +271,7 @@ async function refreshCategories() {
 }
 async function refreshAll() {
   await Promise.all([refreshMe(), refreshTransactions(), refreshPluggyItems(), refreshAccounts(), refreshCategories(), refreshInvestments()]);
+  lastDataFetch = Date.now();
 }
 // Todas as categorias disponíveis (fixas + criadas pelo usuário), sempre com
 // "Não identificada" por último.
@@ -306,6 +356,7 @@ let txFilterPeriodo = "all";
 let txFilterBanco = "all";
 let txFilterTipo = "all";
 let txFilterCategoria = "all";
+let sortMode = { tx: "recent", es: "recent", catdet: "recent" }; // ordenação por valor de cada tela
 let esTipo = "entrada";
 let catSegment = "gastos";
 let catDetalhe = null;
@@ -545,22 +596,26 @@ function navigateTo(screen, { refresh = true, swipeDir = null } = {}) {
   document.getElementById("content").scrollTop = 0;
   loadScreenData(screen, refresh);
 }
-// Bolinhas ao trocar de tela; aproveita para buscar dados novos no servidor e redesenhar a tela.
-let navToken = 0;
+// Ao trocar de tela, desenha na hora com o que já está na memória. Só busca no servidor se os dados
+// tiverem mais de 1 minuto (antes eram 4 chamadas a cada troca de aba, e o servidor grátis é lento).
+let lastDataFetch = 0;
+let dataFetching = false;
 async function loadScreenData(screen, refresh) {
-  const mine = ++navToken;
+  if (!refresh || !state.user || dataFetching) return;
+  if (Date.now() - lastDataFetch < DATA_TTL_MS) return;
+  dataFetching = true;
   showScreenLoader();
   try {
-    const fetching = refresh && state.user
-      ? Promise.all([refreshTransactions(), refreshAccounts(), refreshPluggyItems(), refreshInvestments()])
-      : Promise.resolve();
-    await Promise.all([fetching, sleep(SCREEN_LOADER_MS)]);
-    if (mine === navToken && refresh && state.user && currentScreen === screen) renderScreen(screen);
+    await Promise.all([refreshTransactions(), refreshAccounts(), refreshPluggyItems(), refreshInvestments()]);
+    lastDataFetch = Date.now();
+    if (state.user) renderScreen(currentScreen);
   } catch (e) {
     console.warn("não foi possível atualizar os dados:", e.message);
-    if (mine === navToken) showToast("Não deu para atualizar agora. Estou mostrando os últimos dados salvos. " + e.message, { error: true });
+    lastDataFetch = Date.now() - DATA_TTL_MS + 10000; // tenta de novo em ~10 s, sem ficar repetindo o aviso
+    showToast("Não deu para atualizar agora. Estou mostrando os últimos dados salvos. " + e.message, { error: true });
   } finally {
-    if (mine === navToken) hideScreenLoader();
+    dataFetching = false;
+    hideScreenLoader();
   }
 }
 function renderScreen(screen) {
@@ -610,9 +665,11 @@ function periodRange(id) {
   return null;
 }
 function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) {
+  // "current" = mês atual, calculado na hora (vira o mês sozinho, sem precisar reabrir o app)
+  const ym = periodo === "current" ? curYm() : periodo;
   return txs.filter(t => {
     if (range && (t.date < range.from || t.date > range.to)) return false;
-    if (periodo && periodo !== "all" && t.date.slice(0,7) !== periodo) return false;
+    if (ym && ym !== "all" && t.date.slice(0,7) !== ym) return false;
     if (banco && banco !== "all" && t.bank_id !== banco) return false;
     if (tipo && tipo !== "all" && t.type !== tipo) return false;
     if (categoria && categoria !== "all" && effectiveCategory(t) !== categoria) return false;
@@ -627,16 +684,14 @@ function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) 
 function populateDashboardFilters() {
   const months = getAvailableMonths();
   const periodoSel = document.getElementById("filter-periodo");
-  periodoSel.innerHTML = `<option value="all">Todo o período</option>` +
-    months.map(m => `<option value="${m}">${monthOptionLabel(m)}</option>`).join("");
-  periodoSel.value = dashFilterPeriodo;
+  setSelect(periodoSel, `<option value="all">Todo o período</option><option value="current">Mês atual</option>` +
+    months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join(""), dashFilterPeriodo);
 
   const bancoSel = document.getElementById("filter-banco");
   const institutions = bankAccountsOnly();
   if (dashFilterBanco !== "all" && !institutions.some(i => i.id === dashFilterBanco)) dashFilterBanco = "all";
-  bancoSel.innerHTML = `<option value="all">Todos os bancos</option>` +
-    institutions.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
-  bancoSel.value = dashFilterBanco;
+  setSelect(bancoSel, `<option value="all">Todos os bancos</option>` +
+    institutions.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join(""), dashFilterBanco);
 }
 function monthLabel(ym) {
   const [y,m] = ym.split("-");
@@ -659,9 +714,9 @@ function renderDashboard() {
   const saldoContas = banks.filter(b => (dashFilterBanco === "all" || b.id === dashFilterBanco) && typeof b.balance === "number");
   const saldo = saldoContas.length ? saldoContas.reduce((s,b) => s + b.balance, 0) : entradas - saidas;
 
-  document.getElementById("balance-total").innerHTML = heroMoneyHtml(saldo);
-  document.getElementById("total-entradas").textContent = fmtBRL(entradas);
-  document.getElementById("total-saidas").textContent = fmtBRL(saidas);
+  countTo(document.getElementById("balance-total"), saldo, { fmt: heroMoneyHtml, html: true });
+  countTo(document.getElementById("total-entradas"), entradas);
+  countTo(document.getElementById("total-saidas"), saidas);
   document.getElementById("balance-change").textContent = txs.length ? `${txs.length} transaç${txs.length === 1 ? "ão" : "ões"} no período` : "Nenhuma transação no período";
   const movimento = entradas + saidas;
   const pctIn = movimento ? Math.round((entradas / movimento) * 100) : 50;
@@ -718,6 +773,7 @@ function drawHeroFlow(txs) {
   svg.innerHTML = `<defs><linearGradient id="hf-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".28"/><stop offset="1" stop-color="var(--blue)" stop-opacity="0"/></linearGradient></defs>
     <path d="${d} L${W},${H} L0,${H} Z" fill="url(#hf-fill)"/>
     <path d="${d}" fill="none" stroke="var(--blue)" stroke-width="2.2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  if (!REDUCE_MOTION) { svg.classList.remove("draw"); void svg.getBoundingClientRect(); svg.classList.add("draw"); }
 }
 
 function applyHideUI() {
@@ -738,9 +794,8 @@ function openEntradasSaidas(tipo) {
 function renderEntradasSaidas() {
   const tipo = esTipo;
   document.getElementById("topbar-title").textContent = tipo === "entrada" ? "Entradas" : "Saídas";
-  const txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
-    .filter(t => !isCreditTx(t) && t.type === tipo)
-    .sort((a,b) => b.date.localeCompare(a.date));
+  const txs = sortTxs(filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
+    .filter(t => !isCreditTx(t) && t.type === tipo), sortMode.es);
   const container = document.getElementById("es-list-container");
   if (!txs.length) {
     container.innerHTML = `<div class="empty-state">Nenhuma ${tipo === "entrada" ? "entrada" : "saída"} no período.</div>`;
@@ -754,8 +809,8 @@ function renderEntradasSaidas() {
     groups[key].items.push(t);
     groups[key].total += Math.abs(t.value);
   });
-  const names = Object.keys(groups).sort((a,b) => groups[b].total - groups[a].total);
-  container.innerHTML = names.map(name => {
+  const names = Object.keys(groups).sort((a,b) => sortMode.es === "low" ? groups[a].total - groups[b].total : groups[b].total - groups[a].total);
+  container.innerHTML = sortBtnHtml("es") + names.map(name => {
     const g = groups[name];
     return `<div class="es-bank-group">
       <div class="es-bank-head">
@@ -1033,28 +1088,37 @@ function parseValorInput(str) {
 async function loadPlanData() {
   [planItemsCache, goalsCache, subtitlesCache] = await Promise.all([api("/planned"), api("/goals"), api("/subtitles")]);
 }
-function renderPlanejamento() {
+let planLoadedAt = 0;
+function renderPlanejamento(force = false) {
   if (!planMonth) planMonth = curYm();
   document.querySelectorAll("#plan-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.pmode === planMode));
   document.getElementById("plan-futuros").classList.toggle("hidden", planMode !== "futuros");
   document.getElementById("plan-metas").classList.toggle("hidden", planMode !== "metas");
-  loadPlanData().then(() => {
-    if (planMode === "futuros") renderPlanFuturos(); else renderMetas();
-  }).catch(e => showToast("Não foi possível carregar o planejamento: " + e.message, { error: true }));
+  // Desenha na hora com o que já está em memória; só vai ao servidor se passou 1 minuto ou se algo foi alterado.
+  const paint = () => { if (planMode === "futuros") renderPlanFuturos(); else renderMetas(); };
+  const fresh = planLoadedAt && Date.now() - planLoadedAt < DATA_TTL_MS;
+  if (fresh && !force) { paint(); return; }
+  if (planLoadedAt && !force) paint();
+  showScreenLoader();
+  loadPlanData().then(() => { planLoadedAt = Date.now(); paint(); })
+    .catch(e => showToast("Não foi possível carregar o planejamento: " + e.message, { error: true }))
+    .finally(() => hideScreenLoader());
 }
 function planItemRowHtml(p) {
+  const isIn = p.type === "entrada";
   return `
     <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
-      ${p.paid ? `<div class="plan-row-badge">${ICONS.check(12)} Pago</div>` : ""}
-      <div class="plan-row-main">
-        <div class="plan-row-name">${esc(p.name)}</div>
-        <div class="plan-row-sub">${p.type === "entrada" ? "Ganho" : "Gasto"} planejado${p.day ? ` · dia ${p.day}` : ""}</div>
+      <div class="plan-row-top">
+        <div class="plan-row-main">
+          <div class="plan-row-name">${esc(p.name)}${p.paid ? `<span class="plan-row-badge">${ICONS.check(11)} Pago</span>` : ""}</div>
+          <div class="plan-row-sub">${isIn ? "Ganho" : "Gasto"} planejado${p.day ? ` · dia ${p.day}` : ""}</div>
+        </div>
+        <div class="plan-row-value ${isIn ? "pos" : "neg"}">${isIn ? "+" : "-"} ${fmtBRL(p.value)}</div>
       </div>
-      <div class="plan-row-value ${p.type === "entrada" ? "pos" : "neg"}">${p.type === "entrada" ? "+" : "-"} ${fmtBRL(p.value)}</div>
       <div class="plan-row-actions">
         ${p.paid
           ? `<button type="button" class="btn-outline" data-plan-unpay="${p.id}">Desfazer</button>`
-          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">Marcar como pago</button>
+          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">${ICONS.check(14)} Marcar como pago</button>
              <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
         <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
       </div>
@@ -1069,10 +1133,10 @@ function renderPlanFuturos() {
   const ganhoPlanejado = items.filter(p => p.type === "entrada").reduce((s, p) => s + p.value, 0);
   const gastoPlanejado = items.filter(p => p.type === "saida").reduce((s, p) => s + p.value, 0);
   const resultado = ganhoPlanejado - gastoPlanejado;
-  document.getElementById("plan-sum-planejado").textContent = fmtBRL(ganhoPlanejado);
-  document.getElementById("plan-sum-gasto").textContent = fmtBRL(gastoPlanejado);
+  countTo(document.getElementById("plan-sum-planejado"), ganhoPlanejado);
+  countTo(document.getElementById("plan-sum-gasto"), gastoPlanejado);
   const resEl = document.getElementById("plan-sum-resta");
-  resEl.textContent = fmtBRL(Math.abs(resultado));
+  countTo(resEl, Math.abs(resultado));
   const resCard = document.getElementById("plan-sum-resta-card");
   resCard.classList.toggle("card-green", resultado >= 0);
   resCard.classList.toggle("card-red", resultado < 0);
@@ -1088,7 +1152,7 @@ function renderPlanFuturos() {
   let html = "";
   let rowIdx = 0;
   const withDelay = (h) => { const out = h.replace("class=\"plan-row", `style="animation-delay:${(rowIdx * 0.045).toFixed(3)}s" class="plan-row`); rowIdx++; return out; };
-  if (semCategoria.length) html += semCategoria.map(planItemRowHtml).map(withDelay).join("");
+  if (semCategoria.length) html += `<div class="plan-cat-group plain">${semCategoria.map(planItemRowHtml).map(withDelay).join("")}</div>`;
   html += Object.keys(porCategoria).sort((a, b) => catInfo(a).name.localeCompare(catInfo(b).name)).map((catId, gi) => {
     const catItems = porCategoria[catId];
     const info = catInfo(catId);
@@ -1099,10 +1163,10 @@ function renderPlanFuturos() {
     const subHtml = Object.keys(porSub).sort().map(sub => {
       const subItems = porSub[sub];
       const subTotal = subItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
-      return `<div class="plan-subtitle-head"><span>${esc(sub)}</span><b>${fmtBRL(Math.abs(subTotal))}</b></div>${subItems.map(planItemRowHtml).map(withDelay).join("")}`;
+      return `<div class="plan-subtitle-head"><span>${ICONS.tag(12)} ${esc(sub)}</span>${subItems.length > 1 ? `<b>${fmtBRL(Math.abs(subTotal))}</b>` : ""}</div>${subItems.map(planItemRowHtml).map(withDelay).join("")}`;
     }).join("");
     return `<div class="plan-cat-group" style="animation-delay:${(gi * 0.06).toFixed(3)}s">
-      <div class="plan-cat-head"><span class="cat-icon" style="background:${info.color}">${info.icon}</span><span class="plan-cat-name">${esc(info.name)}</span><b class="plan-cat-total">${fmtBRL(Math.abs(total))}</b></div>
+      <div class="plan-cat-head"><span class="cat-icon" style="background:${info.color}">${info.icon}</span><span class="plan-cat-name">${esc(info.name)}</span><b class="plan-cat-total ${total >= 0 ? "pos" : "neg"}">${fmtBRL(Math.abs(total))}</b></div>
       ${semSub.map(planItemRowHtml).map(withDelay).join("")}
       ${subHtml}
     </div>`;
@@ -1290,7 +1354,7 @@ async function savePlanejado() {
     editingPlanId = null;
     closeAllModals();
     planMonth = meses[meses.length - 1];
-    renderPlanejamento();
+    renderPlanejamento(true);
     showToast(meses.length > 1 ? `${meses.length} itens criados (um por mês).` : "Item salvo.");
   } catch (e) {
     errEl.textContent = e.message || "Não foi possível salvar.";
@@ -1299,7 +1363,7 @@ async function savePlanejado() {
 }
 async function deletePlanItem(id) {
   if (!confirm("Excluir este item do planejamento?")) return;
-  try { await api(`/planned/${id}`, { method: "DELETE" }); renderPlanejamento(); }
+  try { await api(`/planned/${id}`, { method: "DELETE" }); renderPlanejamento(true); }
   catch (e) { showToast("Não foi possível excluir: " + e.message, { error: true }); }
 }
 function askMarkPaid(id) {
@@ -1448,7 +1512,7 @@ async function saveMeta() {
       for (const month of selected) await api("/goals", { method: "POST", body: { category: editingGoalCategory, value, month } });
     }
     closeAllModals();
-    renderPlanejamento();
+    renderPlanejamento(true);
     showToast("Meta salva.");
   } catch (e) { errEl.textContent = e.message || "Não foi possível salvar a meta."; errEl.classList.remove("hidden"); }
 }
@@ -1462,7 +1526,7 @@ async function removeMeta() {
   try {
     for (const id of ids) await api(`/goals/${id}`, { method: "DELETE" });
     closeAllModals();
-    renderPlanejamento();
+    renderPlanejamento(true);
   } catch (e) { showToast("Não foi possível remover: " + e.message, { error: true }); }
 }
 
@@ -1478,9 +1542,8 @@ function renderCategoriaDetalhe() {
   const isGasto = catSegment === "gastos";
   document.getElementById("topbar-title").textContent = info.name;
   const ym = catMonth || curYm();
-  const txs = state.transactions
-    .filter(t => t.date.slice(0, 7) === ym && (isGasto ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === catDetalhe)
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const txs = sortTxs(state.transactions
+    .filter(t => t.date.slice(0, 7) === ym && (isGasto ? t.type === "saida" : t.type === "entrada") && effectiveCategory(t) === catDetalhe), sortMode.catdet);
   const total = txs.reduce((s, t) => s + Math.abs(t.value), 0);
   const el = document.getElementById("catdet-container");
   const head = `<div class="card catdet-head">
@@ -1489,7 +1552,7 @@ function renderCategoriaDetalhe() {
     <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"} • ${esc(monthLabel(ym))}</div></div>
     <div class="cat-amount catdet-total ${isGasto ? "neg" : "pos"}">${fmtBRL(total)}</div>
   </div>`;
-  el.innerHTML = head + (txs.length ? `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria neste mês.</div>`);
+  el.innerHTML = head + (txs.length ? sortBtnHtml("catdet") + `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria neste mês.</div>`);
 }
 
 /* ============================================================
@@ -1583,13 +1646,13 @@ function populateTxFilters() {
 }
 
 function renderTransacoes() {
-  populateTxFilters();
+  // (as opções dos filtros são montadas quando o painel de filtros abre, não a cada digitação)
   // o botão de filtros fica destacado quando há filtro ligado (antes não dava para saber por que a lista estava menor)
   const filtrando = txFilterPeriodo !== "all" || txFilterBanco !== "all" || txFilterTipo !== "all" || txFilterCategoria !== "all";
   document.getElementById("btn-toggle-filtros")?.classList.toggle("active", filtrando);
   renderTxReviewBanner();
-  const allTxs = filterTx(state.transactions, { range: periodRange(txFilterPeriodo), banco: txFilterBanco, tipo: txFilterTipo, categoria: txFilterCategoria, search: txSearch })
-    .sort((a,b) => b.date.localeCompare(a.date));
+  renderSortSlot("tx-sort-slot", "tx");
+  const allTxs = sortTxs(filterTx(state.transactions, { range: periodRange(txFilterPeriodo), banco: txFilterBanco, tipo: txFilterTipo, categoria: txFilterCategoria, search: txSearch }), sortMode.tx);
   const container = document.getElementById("tx-list-container");
   if (!allTxs.length) {
     container.innerHTML = `<div class="empty-state">Nenhuma transação encontrada.</div>`;
@@ -1602,10 +1665,13 @@ function renderTransacoes() {
     (groups[key] = groups[key] || []).push(t);
   });
   const months = Object.keys(groups).sort().reverse();
-  let html = months.map(m => {
-    const rows = groups[m].map(t => txRowHtml(t)).join("");
-    return `<div class="tx-month-label">${monthLabel(m)}</div>${rows}`;
-  }).join("");
+  // ordenado por data: agrupa por mês; ordenado por valor: lista corrida (os meses ficariam embaralhados)
+  let html = sortMode.tx === "recent"
+    ? months.map(m => {
+        const rows = groups[m].map(t => txRowHtml(t)).join("");
+        return `<div class="tx-month-label">${monthLabel(m)}</div>${rows}`;
+      }).join("")
+    : txs.map(t => txRowHtml(t)).join("");
   html += `<div class="tx-count-label">Mostrando ${txs.length} de ${allTxs.length} transações</div>`;
   if (allTxs.length > txVisibleCount) {
     html += `<button class="btn btn-outline" id="btn-load-more-tx">Carregar mais</button>`;
@@ -2144,6 +2210,7 @@ async function logoutUser() {
   state.investments = []; state.investHistory = []; state.customCategories = []; state.categoryOverrides = {};
   dashFilterPeriodo = "all"; dashFilterBanco = "all"; txSearch = ""; txFilterPeriodo = "all"; txFilterBanco = "all";
   txFilterTipo = "all"; txFilterCategoria = "all"; txVisibleCount = TX_PAGE_SIZE; catDetalhe = null; currentScreen = "inicio";
+  sortMode = { tx: "recent", es: "recent", catdet: "recent" }; planLoadedAt = 0; lastDataFetch = 0;
   localStorage.removeItem("lastScreen");
   closeAllModals();
   showLogin();
@@ -2351,6 +2418,7 @@ async function startPluggyConnect() {
 const syncingNow = new Set();
 async function refreshAfterSync() {
   await Promise.all([refreshTransactions(), refreshAccounts(), refreshPluggyItems(), refreshInvestments()]);
+  lastDataFetch = Date.now();
   renderScreen(currentScreen);
 }
 async function syncPluggyItem(itemId, { quiet = false } = {}) {
@@ -2607,7 +2675,12 @@ document.addEventListener("DOMContentLoaded", () => {
       populateTxFilters();
       renderTransacoes();
     });
-    document.getElementById("search-transacoes").addEventListener("input", (e) => { txSearch = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
+    let txSearchTimer = null;
+    document.getElementById("search-transacoes").addEventListener("input", (e) => {
+      const v = e.target.value;
+      clearTimeout(txSearchTimer);
+      txSearchTimer = setTimeout(() => { txSearch = v; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); }, 180);
+    });
     document.getElementById("tx-filter-periodo").addEventListener("change", (e) => { txFilterPeriodo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-banco").addEventListener("change", (e) => { txFilterBanco = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
     document.getElementById("tx-filter-tipo").addEventListener("change", (e) => { txFilterTipo = e.target.value; txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); });
@@ -2820,4 +2893,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }, "boot");
 
   wire(initGoogleLogin, "Google Sign-In");
+});
+
+
+// Botão de ordenar por valor (Transações, Entradas/Saídas e detalhe da categoria)
+document.addEventListener("DOMContentLoaded", () => {
+  wire(() => {
+    document.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-sort]"); if (!b) return;
+      const key = b.dataset.sort;
+      sortMode[key] = SORT_CYCLE[(SORT_CYCLE.indexOf(sortMode[key]) + 1) % SORT_CYCLE.length];
+      if (key === "tx") { txVisibleCount = TX_PAGE_SIZE; renderTransacoes(); }
+      else if (key === "es") renderEntradasSaidas();
+      else if (key === "catdet") renderCategoriaDetalhe();
+    });
+  }, "ordenação por valor");
 });
