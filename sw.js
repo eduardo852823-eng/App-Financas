@@ -1,8 +1,8 @@
 /* Service worker do Fluxo: deixa o app instalável e abrir rápido.
    Arquivos do próprio site: tenta a rede primeiro e cai para o cache se estiver offline.
    Nada de API/dados financeiros é guardado em cache. */
-const CACHE = "fluxo-v6";
-const SHELL = ["./", "index.html", "style.css", "script.js", "logo.png", "icon-192.png", "icon-512.png"];
+const CACHE = "fluxo-v7";
+const SHELL = ["./", "index.html", "style.css", "script.js", "logo.png", "logo-mark.png", "logo-word.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
   self.skipWaiting();

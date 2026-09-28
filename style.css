@@ -1387,3 +1387,71 @@ body{overscroll-behavior-y:none;}
 .plan-row-actions .btn-outline{flex:1; padding:10px 14px; border-radius:12px; border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:12.5px; cursor:pointer;}
 .plan-row-actions .icon-btn{width:40px; height:40px; border-radius:12px; background:var(--gray-100);}
 .plan-row.paid .plan-row-value{opacity:.75;}
+
+/* ============================================================
+   FLUXO 2 — login novo, animações de valores, troca de mês
+   ============================================================ */
+.content{font-variant-numeric:tabular-nums;}
+
+/* barrinha de carregamento (aparece a cada troca de tela) */
+.top-progress{height:3px;}
+.top-progress i{width:46%; background:linear-gradient(90deg, transparent, var(--blue), #86efac, transparent); box-shadow:0 0 10px var(--blue);}
+
+/* ---- login: sempre verde escuro, igual à logo (claro ou escuro) ---- */
+.screen.screen-login{
+  position:relative; overflow-x:hidden; overflow-y:auto; color:#e8fff0;
+  background:linear-gradient(200deg, #1b6a3d 0%, #0d4a2b 32%, #06301d 64%, #021a10 100%);
+}
+.login-bg{position:absolute; inset:0; overflow:hidden; pointer-events:none;}
+.login-bg .orb{position:absolute; border-radius:50%; filter:blur(48px); opacity:.55; will-change:transform;}
+.login-bg .o1{width:300px; height:300px; top:-90px; right:-80px; background:#4ade80; opacity:.30; animation:orbA 11s ease-in-out infinite;}
+.login-bg .o2{width:260px; height:260px; bottom:-70px; left:-90px; background:#16a34a; opacity:.35; animation:orbB 13s ease-in-out infinite;}
+.login-bg .o3{width:180px; height:180px; top:42%; left:55%; background:#86efac; opacity:.12; animation:orbA 15s ease-in-out infinite reverse;}
+@keyframes orbA{0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-36px,42px) scale(1.15);}}
+@keyframes orbB{0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(44px,-34px) scale(1.12);}}
+.screen-login .login-wrap{position:relative; z-index:1;}
+.screen-login .login-logo{margin-bottom:34px;}
+
+.login-mark-wrap{position:relative; width:128px; height:118px; animation:markIn .9s cubic-bezier(.16,1,.3,1) both, markFloat 5s ease-in-out 1s infinite;}
+.login-mark{position:relative; z-index:2; display:block; width:100%; height:100%; filter:drop-shadow(0 10px 22px rgba(74,222,128,.35));}
+.login-halo{position:absolute; z-index:1; left:50%; top:50%; width:190px; height:190px; margin:-95px 0 0 -95px; border-radius:50%; background:radial-gradient(circle, rgba(134,239,172,.42) 0%, rgba(134,239,172,0) 68%); animation:haloPulse 3.6s ease-in-out infinite;}
+.login-shine{position:absolute; inset:0; z-index:3; pointer-events:none;
+  -webkit-mask:url(logo-mark.png) center/contain no-repeat; mask:url(logo-mark.png) center/contain no-repeat;
+  background:linear-gradient(110deg, transparent 38%, rgba(255,255,255,.85) 50%, transparent 62%); background-size:260% 100%; background-position:130% 0;
+  animation:shineSweep 4.2s ease-in-out 1.4s infinite;}
+@keyframes markIn{from{opacity:0; transform:translateY(24px) scale(.82);} to{opacity:1; transform:none;}}
+@keyframes markFloat{0%,100%{transform:translateY(0);} 50%{transform:translateY(-7px);}}
+@keyframes haloPulse{0%,100%{transform:scale(.9); opacity:.7;} 50%{transform:scale(1.12); opacity:1;}}
+@keyframes shineSweep{0%{background-position:130% 0;} 55%,100%{background-position:-30% 0;}}
+
+.login-word{display:block; width:150px; height:auto; margin-top:22px; animation:fadeUp .8s cubic-bezier(.16,1,.3,1) .25s both;}
+.screen-login .login-tagline{margin-top:12px; font-size:14px; letter-spacing:.3px; color:rgba(220,252,231,.72); animation:fadeUp .8s cubic-bezier(.16,1,.3,1) .4s both;}
+@keyframes fadeUp{from{opacity:0; transform:translateY(16px);} to{opacity:1; transform:none;}}
+.login-actions > *{animation:fadeUp .7s cubic-bezier(.16,1,.3,1) both;}
+.login-actions > *:nth-child(1){animation-delay:.5s;} .login-actions > *:nth-child(2){animation-delay:.58s;}
+.login-actions > *:nth-child(3){animation-delay:.66s;} .login-actions > *:nth-child(4){animation-delay:.74s;}
+.login-actions > *:nth-child(n+5){animation-delay:.82s;}
+
+.screen-login .login-or{color:rgba(220,252,231,.6);}
+.screen-login .login-or::before, .screen-login .login-or::after{background:rgba(220,252,231,.22);}
+.screen-login .btn.btn-outline{background:rgba(255,255,255,.08); color:#f0fff5; border:1.5px solid rgba(255,255,255,.28); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); border-radius:999px;}
+.screen-login .btn.btn-outline:active{background:rgba(255,255,255,.16);}
+.screen-login .link-create-account{color:#86efac; font-weight:700;}
+.screen-login .btn-install{color:#bbf7d0; border-color:rgba(187,247,208,.55);}
+.screen-login .install-hint{color:rgba(220,252,231,.7);}
+.screen-login .google-btn-container{border-radius:999px; box-shadow:0 10px 26px rgba(0,0,0,.28);}
+
+/* ---- troca de mês (Planejamento e Categorias) ---- */
+.pm-anim{animation:pmIn .5s cubic-bezier(.16,1,.3,1) both; animation-delay:var(--d,0ms);}
+@keyframes pmIn{
+  from{opacity:0; transform:translateX(var(--dx,30px)) scale(.97); filter:blur(3px);}
+  to{opacity:1; transform:none; filter:none;}
+}
+.month-label.pm-anim{animation-name:pmLabel; animation-duration:.45s;}
+@keyframes pmLabel{
+  from{opacity:0; transform:translateX(var(--dx,30px)) scale(.9); filter:blur(4px);}
+  60%{opacity:1;}
+  to{opacity:1; transform:none; filter:none;}
+}
+.month-arrow.pm-tap{animation:arrowTap .3s ease;}
+@keyframes arrowTap{50%{transform:scale(.86);}}

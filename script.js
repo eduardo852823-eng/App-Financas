@@ -175,6 +175,8 @@ function hideScreenLoader(force) {
   clearTimeout(loaderWatchdog);
   document.getElementById("screen-loader")?.classList.remove("show");
 }
+// Barrinha rápida a cada troca de tela: dá tempo dos valores "subirem" e mostra que o app está trabalhando.
+function flashLoader(ms = 650) { showScreenLoader(); setTimeout(() => hideScreenLoader(), ms); }
 const MONTH_NAMES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 /* ============================================================
@@ -575,6 +577,7 @@ function navigateTo(screen, { refresh = true, swipeDir = null } = {}) {
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   if (screen === "categorias" && currentScreen !== "categorias" && currentScreen !== "categoria-detalhe") catMonth = null; // ao entrar, sempre o mês atual
   if (screen === "planejamento" && currentScreen !== "planejamento") planMonth = null;
+  if (screen !== currentScreen) flashLoader();
   currentScreen = screen;
   document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active", "swipe-in-left", "swipe-in-right"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
@@ -1173,13 +1176,30 @@ function renderPlanFuturos() {
   }).join("");
   el.innerHTML = html;
 }
+// Animação ao trocar de mês: só o conteúdo desliza (as setinhas ficam paradas) e os valores sobem de novo.
+function animateMonthChange(wrapId, delta) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const dx = delta > 0 ? 34 : -34;
+  let i = 0;
+  wrap.querySelectorAll(":scope > *").forEach(el => {
+    let target = el;
+    if (el.classList.contains("month-nav")) {
+      target = el.querySelector(".month-label");
+      el.querySelectorAll(".month-arrow").forEach(a => { a.classList.remove("pm-tap"); void a.offsetWidth; a.classList.add("pm-tap"); });
+    } else if (el.classList.contains("screen-hint") || el.classList.contains("hidden")) return;
+    if (!target) return;
+    target.style.setProperty("--dx", dx + "px");
+    target.style.setProperty("--d", Math.min(i * 55, 330) + "ms");
+    target.classList.remove("pm-anim"); void target.offsetWidth; target.classList.add("pm-anim");
+    i++;
+  });
+}
 function changePlanMonth(delta) {
   planMonth = shiftYm(planMonth || curYm(), delta);
-  const wrap = document.getElementById("plan-futuros");
-  wrap.classList.remove("plan-slide", "dir-next", "dir-prev");
-  void wrap.offsetWidth;
-  wrap.classList.add("plan-slide", delta > 0 ? "dir-next" : "dir-prev");
   renderPlanFuturos();
+  animateMonthChange("plan-futuros", delta);
+  flashLoader(450);
 }
 
 /* ---------- dropdown customizado (categoria / subtítulo) ---------- */
@@ -2017,6 +2037,8 @@ function changeCatMonth(delta) {
   if (next > curYm() || next < catEarliestYm()) return;
   catMonth = next;
   renderCategorias();
+  animateMonthChange("cat-view", delta);
+  flashLoader(450);
 }
 
 function openNovaCategoriaModal(editId) {
@@ -2909,3 +2931,69 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }, "ordenação por valor");
 });
+
+/* ============================================================
+   VALORES SUBINDO: todo "R$ 0,00" que aparece na tela sobe de 0 até o valor final.
+   Observa o que o app desenha e anima só o que está visível (sem mexer nas funções de render).
+   ============================================================ */
+(() => {
+  const HAS = /R\$[\s\u00a0]?\d{1,3}(?:\.\d{3})*,\d{2}/;
+  const RE = /(R\$[\s\u00a0]?)(\d{1,3}(?:\.\d{3})*,\d{2})/g;
+  const BRL = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const DUR = 950, MAX_NODES = 60, SKIP = ".modal-overlay, .toast, [data-no-count]";
+  let pending = [], raf = 0, running = [], ticking = false;
+
+  const reduced = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const parse = (n) => parseFloat(n.replace(/\./g, "").replace(",", "."));
+  const frame = (final, e) => final.replace(RE, (m, pre, num) => pre + BRL.format(parse(num) * e));
+
+  function collect(node, out) {
+    if (node.nodeType === 3) {
+      if (HAS.test(node.nodeValue) && !node.parentElement?.closest(SKIP)) out.push(node);
+      return;
+    }
+    if (node.nodeType !== 1 || node.closest(SKIP)) return;
+    const w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) if (HAS.test(n.nodeValue)) out.push(n);
+  }
+  function inView(n) {
+    const el = n.parentElement;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight;
+  }
+  function flush() {
+    raf = 0;
+    const batch = pending; pending = [];
+    if (reduced()) return;
+    const nodes = [];
+    batch.forEach(n => { if (n.isConnected) collect(n, nodes); });
+    const vis = nodes.filter(inView).slice(0, MAX_NODES);
+    const now = performance.now();
+    vis.forEach((node, i) => {
+      running = running.filter(r => r.node !== node);
+      const final = node.nodeValue;
+      node.nodeValue = frame(final, 0);           // já começa em zero, antes de pintar
+      running.push({ node, final, t0: now + Math.min(i * 35, 280) });
+    });
+    if (running.length && !ticking) { ticking = true; requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    running = running.filter(r => {
+      if (!r.node.isConnected) return false;
+      const p = Math.min(1, Math.max(0, (now - r.t0) / DUR));
+      r.node.nodeValue = p >= 1 ? r.final : frame(r.final, 1 - Math.pow(1 - p, 4));
+      return p < 1;
+    });
+    if (running.length) requestAnimationFrame(tick); else ticking = false;
+  }
+  document.addEventListener("DOMContentLoaded", () => {
+    const content = document.getElementById("content");
+    if (!content || !("MutationObserver" in window)) return;
+    new MutationObserver(muts => {
+      muts.forEach(m => m.addedNodes.forEach(n => pending.push(n)));
+      if (!raf) raf = requestAnimationFrame(flush);
+    }).observe(content, { childList: true, subtree: true });
+  });
+})();
