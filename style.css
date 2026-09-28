@@ -198,15 +198,25 @@ a{text-decoration:none; color:inherit;}
 .content{flex:1; padding:18px 18px 100px; overflow-y:auto;}
 .content .screen{display:none;}
 .content .screen.active{display:block; animation:screenEnter .42s cubic-bezier(.16,1,.3,1);}
+.content .screen.active.swipe-in-left{animation:swipeInLeft .32s cubic-bezier(.16,1,.3,1);}
+.content .screen.active.swipe-in-right{animation:swipeInRight .32s cubic-bezier(.16,1,.3,1);}
 @keyframes screenEnter{
   from{opacity:0; transform:translateY(22px) scale(.97);}
   to{opacity:1; transform:translateY(0) scale(1);}
+}
+@keyframes swipeInLeft{
+  from{opacity:0; transform:translateX(38px);}
+  to{opacity:1; transform:translateX(0);}
+}
+@keyframes swipeInRight{
+  from{opacity:0; transform:translateX(-38px);}
+  to{opacity:1; transform:translateX(0);}
 }
 @keyframes itemPop{
   from{opacity:0; transform:translateY(10px);}
   to{opacity:1; transform:translateY(0);}
 }
-.tx-row, .bank-row, .cat-row, .bank-chip, .add-inst-item, .legend-row, .plan-row, .plan-cat-group{
+.tx-row, .bank-row, .cat-row, .bank-chip, .add-inst-item, .legend-row, .plan-row, .plan-cat-group, .meta-row{
   animation:itemPop .32s ease both;
 }
 @keyframes pulseIn{
@@ -1209,15 +1219,20 @@ body{overscroll-behavior-y:none;}
 
 .plan-error{color:var(--out); font-size:13px; margin-top:8px;}
 
-.meta-row{display:flex; align-items:center; gap:12px; background:var(--card-bg); border-radius:var(--radius-md); padding:14px; box-shadow:var(--shadow); margin-bottom:10px;}
-.meta-row-set{flex-direction:column; align-items:stretch;}
+.meta-row{display:flex; align-items:center; gap:12px; background:var(--card-bg); border-radius:var(--radius-md); padding:16px; box-shadow:var(--shadow); margin-bottom:12px; transition:transform .16s ease, box-shadow .16s ease; border:1px solid transparent;}
+.meta-row:hover{transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.1);}
+.meta-row-set{flex-direction:column; align-items:stretch; cursor:pointer;}
+.meta-row-set:hover{border-color:rgba(var(--accent-rgb),0.25);}
 .meta-row-top{display:flex; align-items:center; justify-content:space-between; gap:10px;}
 .meta-row-head{display:flex; align-items:center; gap:12px; min-width:0;}
 .meta-row-main{min-width:0;}
-.meta-amount{font-weight:800; font-variant-numeric:tabular-nums; font-size:14px;}
-.meta-bar{max-width:none; margin:10px 0 6px;}
-.meta-status{font-size:12.5px; font-weight:700; color:var(--green);}
+.meta-row .cat-icon{box-shadow:0 4px 10px rgba(0,0,0,.14);}
+.meta-amount{font-weight:800; font-variant-numeric:tabular-nums; font-size:16px;}
+.meta-bar{max-width:none; margin:12px 0 8px; height:8px; border-radius:8px;}
+.meta-bar i{border-radius:8px;}
+.meta-status{font-size:12.5px; font-weight:700; color:var(--green); display:inline-flex; align-items:center; gap:5px;}
 .meta-status.over{color:var(--out);}
+.meta-status::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor; display:inline-block;}
 
 .month-check-grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:10px;}
 .month-check{border:1.5px solid var(--gray-300); background:transparent; color:var(--text-secondary); font-weight:700; font-size:11.5px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:all .16s ease;}
@@ -1262,6 +1277,7 @@ body{overscroll-behavior-y:none;}
 .plan-cat-head .cat-icon{width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;}
 .plan-cat-name{font-weight:800; font-size:13.5px; flex:1;}
 .plan-cat-total{font-size:13.5px; font-variant-numeric:tabular-nums;}
+.month-current-tag{display:inline-block; font-size:10px; font-weight:800; letter-spacing:.3px; text-transform:uppercase; color:var(--blue); background:rgba(var(--accent-rgb),0.12); padding:2px 7px; border-radius:999px; vertical-align:middle; margin-left:4px;}
 
 /* ---------- dropdown customizado (categoria / subtítulo) ---------- */
 .hidden-native-select{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;}
@@ -1307,10 +1323,20 @@ body{overscroll-behavior-y:none;}
 .cselect-add-btn:active{transform:scale(.9);}
 
 /* ---------- transição ao trocar de mês no planejamento ---------- */
-.plan-slide{animation:planFade .3s ease;}
-@keyframes planFade{
-  from{opacity:0; transform:translateY(4px);}
-  to{opacity:1; transform:translateY(0);}
+.plan-slide{animation:planSlide .38s cubic-bezier(.16,1,.3,1);}
+.plan-slide.dir-next{animation-name:planSlideNext;}
+.plan-slide.dir-prev{animation-name:planSlidePrev;}
+@keyframes planSlide{
+  from{opacity:0; transform:translateY(10px) scale(.98);}
+  to{opacity:1; transform:translateY(0) scale(1);}
+}
+@keyframes planSlideNext{
+  from{opacity:0; transform:translateX(28px) scale(.98);}
+  to{opacity:1; transform:translateX(0) scale(1);}
+}
+@keyframes planSlidePrev{
+  from{opacity:0; transform:translateX(-28px) scale(.98);}
+  to{opacity:1; transform:translateX(0) scale(1);}
 }
 
 /* ---------- metas por categoria: expandir subtítulos ---------- */

@@ -518,18 +518,22 @@ function showApp() {
   setTimeout(() => autoSyncAll(), 2500);
 }
 const BRAND_HTML = '<span class="brand"><img class="brand-mark" src="icon-192.png" alt="" width="26" height="26"><span class="brand-name">Fluxo</span></span>';
-function navigateTo(screen, { refresh = true } = {}) {
+function navigateTo(screen, { refresh = true, swipeDir = null } = {}) {
   const remember = screen === "categoria-detalhe" ? "categorias" : screen;
   if (NAV_DEFS[remember]) localStorage.setItem("lastScreen", remember); // ao reabrir o app volta para onde você parou
   if (screen === "transacoes" && currentScreen !== "transacoes") txVisibleCount = TX_PAGE_SIZE;
   if (screen === "categorias" && currentScreen !== "categorias" && currentScreen !== "categoria-detalhe") catMonth = null; // ao entrar, sempre o mês atual
   if (screen === "planejamento" && currentScreen !== "planejamento") planMonth = null;
   currentScreen = screen;
-  document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".content .screen").forEach(s => s.classList.remove("active", "swipe-in-left", "swipe-in-right"));
   const target = document.querySelector(`.screen[data-screen="${screen}"]`);
   if (target) {
     void target.offsetWidth;
     target.classList.add("active");
+    if (swipeDir) {
+      target.classList.add(swipeDir === "left" ? "swipe-in-left" : "swipe-in-right");
+      target.addEventListener("animationend", () => target.classList.remove("swipe-in-left", "swipe-in-right"), { once: true });
+    }
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
   const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
@@ -637,6 +641,10 @@ function populateDashboardFilters() {
 function monthLabel(ym) {
   const [y,m] = ym.split("-");
   return `${MONTH_NAMES[parseInt(m)-1]} ${y}`;
+}
+function monthLabelWithTag(ym) {
+  const label = monthLabel(ym);
+  return ym === curYm() ? `${label} <span class="month-current-tag">mês atual</span>` : label;
 }
 
 function renderDashboard() {
@@ -1055,7 +1063,7 @@ function planItemRowHtml(p) {
     </div>`;
 }
 function renderPlanFuturos() {
-  document.getElementById("plan-month-label").textContent = monthLabel(planMonth);
+  document.getElementById("plan-month-label").innerHTML = monthLabelWithTag(planMonth);
   // O planejamento é um mundo à parte: ignora completamente o saldo real da conta
   // (transações de verdade). Cada mês começa "zerado" e o resultado vem só do que
   // foi planejado (e do que já foi de fato marcado como pago) dentro da própria aba.
@@ -1080,8 +1088,10 @@ function renderPlanFuturos() {
   items.filter(p => p.category).forEach(p => { (porCategoria[p.category] = porCategoria[p.category] || []).push(p); });
 
   let html = "";
-  if (semCategoria.length) html += semCategoria.map(planItemRowHtml).join("");
-  html += Object.keys(porCategoria).sort((a, b) => catInfo(a).name.localeCompare(catInfo(b).name)).map(catId => {
+  let rowIdx = 0;
+  const withDelay = (h) => { const out = h.replace("class=\"plan-row", `style="animation-delay:${(rowIdx * 0.045).toFixed(3)}s" class="plan-row`); rowIdx++; return out; };
+  if (semCategoria.length) html += semCategoria.map(planItemRowHtml).map(withDelay).join("");
+  html += Object.keys(porCategoria).sort((a, b) => catInfo(a).name.localeCompare(catInfo(b).name)).map((catId, gi) => {
     const catItems = porCategoria[catId];
     const info = catInfo(catId);
     const total = catItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
@@ -1091,11 +1101,11 @@ function renderPlanFuturos() {
     const subHtml = Object.keys(porSub).sort().map(sub => {
       const subItems = porSub[sub];
       const subTotal = subItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
-      return `<div class="plan-subtitle-head"><span>${esc(sub)}</span><b>${fmtBRL(Math.abs(subTotal))}</b></div>${subItems.map(planItemRowHtml).join("")}`;
+      return `<div class="plan-subtitle-head"><span>${esc(sub)}</span><b>${fmtBRL(Math.abs(subTotal))}</b></div>${subItems.map(planItemRowHtml).map(withDelay).join("")}`;
     }).join("");
-    return `<div class="plan-cat-group">
+    return `<div class="plan-cat-group" style="animation-delay:${(gi * 0.06).toFixed(3)}s">
       <div class="plan-cat-head"><span class="cat-icon" style="background:${info.color}">${info.icon}</span><span class="plan-cat-name">${esc(info.name)}</span><b class="plan-cat-total">${fmtBRL(Math.abs(total))}</b></div>
-      ${semSub.map(planItemRowHtml).join("")}
+      ${semSub.map(planItemRowHtml).map(withDelay).join("")}
       ${subHtml}
     </div>`;
   }).join("");
@@ -1104,9 +1114,9 @@ function renderPlanFuturos() {
 function changePlanMonth(delta) {
   planMonth = shiftYm(planMonth || curYm(), delta);
   const wrap = document.getElementById("plan-futuros");
-  wrap.classList.remove("plan-slide");
+  wrap.classList.remove("plan-slide", "dir-next", "dir-prev");
   void wrap.offsetWidth;
-  wrap.classList.add("plan-slide");
+  wrap.classList.add("plan-slide", delta > 0 ? "dir-next" : "dir-prev");
   renderPlanFuturos();
 }
 
@@ -1352,13 +1362,14 @@ function renderMetas() {
   const ym = curYm(); // só o mês atual
   const cats = allCategories().filter(c => c.id !== "salario" && c.id !== "nao_identificada");
   const el = document.getElementById("metas-list");
-  el.innerHTML = cats.map(c => {
+  el.innerHTML = cats.map((c, i) => {
+    const delay = `style="animation-delay:${(i * 0.06).toFixed(3)}s"`;
     const goal = goalFor(c.id, ym);
-    const catItems = planItemsCache.filter(p => p.category === c.id && p.month === ym && p.paid && p.type === "saida");
+    const catItems = planItemsCache.filter(p => p.category === c.id && p.month === ym && p.type === "saida");
     const gasto = catItems.reduce((t, p) => t + p.value, 0);
     const subs = metaSubtitlesHtml(c.id, catItems);
     if (!goal) {
-      return `<div class="meta-row" data-cat="${esc(c.id)}">
+      return `<div class="meta-row" ${delay} data-cat="${esc(c.id)}">
         <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
         <div class="meta-row-main">
           <div class="cat-name">${esc(c.name)}</div>
@@ -1371,7 +1382,7 @@ function renderMetas() {
     const diff = goal.value - gasto;
     const pct = Math.min(100, (gasto / goal.value) * 100);
     const over = gasto > goal.value;
-    return `<div class="meta-row meta-row-set" data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
+    return `<div class="meta-row meta-row-set" ${delay} data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
       <div class="meta-row-top">
         <div class="meta-row-head">
           <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
@@ -1901,7 +1912,7 @@ function renderCategorias() {
   document.querySelectorAll("#cat-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === catMode));
   if (catMode === "comparar") { renderComparar(); return; }
 
-  document.getElementById("cat-month-label").textContent = monthLabel(catMonth);
+  document.getElementById("cat-month-label").innerHTML = monthLabelWithTag(catMonth);
   document.getElementById("cat-prev").disabled = catMonth <= catEarliestYm();
   document.getElementById("cat-next").disabled = catMonth >= curYm();
 
@@ -2489,6 +2500,32 @@ document.addEventListener("DOMContentLoaded", () => {
       btn.addEventListener("click", () => navigateTo(btn.dataset.nav));
     });
   }, "navegação");
+
+  wire(() => {
+    const content = document.getElementById("content");
+    let sx = 0, sy = 0, tracking = false;
+    content.addEventListener("touchstart", (e) => {
+      if (document.querySelector(".modal-overlay.active") || e.touches.length !== 1) { tracking = false; return; }
+      // não intercepta swipe dentro de áreas com rolagem horizontal própria (rolinhos de data, etc.)
+      if (e.target.closest(".wheel-wrap, .cselect, .cat-month-nav, .month-year-nav")) { tracking = false; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+    }, { passive: true });
+    content.addEventListener("touchend", (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+      const cfg = getNavCfg();
+      const visible = cfg.order.filter(id => !cfg.hidden.includes(id));
+      const activeId = currentScreen === "categoria-detalhe" ? "categorias" : currentScreen;
+      const idx = visible.indexOf(activeId);
+      if (idx === -1) return;
+      const nextIdx = dx < 0 ? idx + 1 : idx - 1; // arrastou pra esquerda = próxima aba; pra direita = aba anterior
+      if (nextIdx < 0 || nextIdx >= visible.length) return;
+      navigateTo(visible[nextIdx], { swipeDir: dx < 0 ? "left" : "right" });
+    }, { passive: true });
+  }, "swipe entre telas");
 
   wire(() => {
     document.querySelectorAll("[data-close-modal]").forEach(btn => btn.addEventListener("click", closeAllModals));
