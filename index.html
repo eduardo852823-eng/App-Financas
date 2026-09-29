@@ -153,10 +153,6 @@
       <!-- ---------- ENTRADAS / SAÍDAS (detalhe) ---------- -->
       <section class="screen screen-entradas-saidas" data-screen="entradas-saidas">
         <div class="es-summary in" id="es-summary"></div>
-        <div class="segmented es-view" id="es-view">
-          <button type="button" class="seg-btn active" data-esview="dia">Por dia</button>
-          <button type="button" class="seg-btn" data-esview="categoria">Por categoria</button>
-        </div>
         <div id="es-sort-slot"></div>
         <div id="es-list-container"></div>
       </section>
@@ -259,9 +255,14 @@
             <li><b>Transações:</b> toque numa transação para trocar a categoria.</li>
             <li><b>Categorias:</b> veja os gastos e ganhos do mês (as setas trocam de mês) e toque numa categoria para ver as transações dela. Em "Comparar meses" você vê a diferença entre dois meses.</li>
             <li><b>Investimentos:</b> acompanhe o que está aplicado e quanto rendeu.</li>
+            <li><b>Planejamento:</b> anote gastos futuros, marque como pago e defina metas por categoria.</li>
             <li><b>Configurações:</b> mude a cor do app e a ordem das abas de baixo.</li>
           </ol>
         </div>
+        <button type="button" class="btn btn-primary tut-open" id="btn-tutorial">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5v-16zM4 19.5A2.5 2.5 0 016.5 17H20"/></svg>
+          Tutorial completo do app
+        </button>
       </section>
 
       <!-- ---------- PLANEJAMENTO ---------- -->
@@ -277,14 +278,14 @@
             <div class="month-label" id="plan-month-label">—</div>
             <button type="button" class="month-arrow" id="plan-next" aria-label="Próximo mês"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
           </div>
-          <p class="screen-hint">Este resumo é só do planejamento — não olha o saldo real da conta. Cada mês começa zerado.</p>
-          <div class="plan-summary-grid">
-            <div class="plan-sum-card card-green"><span class="mini-label">Ganhos planejados</span><span class="mini-value" id="plan-sum-planejado">R$ 0,00</span></div>
-            <div class="plan-sum-card card-red"><span class="mini-label">Gastos planejados</span><span class="mini-value" id="plan-sum-gasto">R$ 0,00</span></div>
-          </div>
-          <div class="plan-result-banner" id="plan-sum-resta-card">
-            <span class="plan-result-label" id="plan-sum-resta-label">Lucro do mês</span>
-            <span class="plan-result-value" id="plan-sum-resta">R$ 0,00</span>
+          <div class="pl-hero pos" id="plan-sum-resta-card">
+            <span class="pl-hero-label" id="plan-sum-resta-label">Sobra prevista do mês</span>
+            <span class="pl-hero-value" id="plan-sum-resta">R$ 0,00</span>
+            <div class="pl-hero-bar" aria-hidden="true"><i id="plan-bar-gasto"></i></div>
+            <div class="pl-hero-row">
+              <span class="pl-hero-stat"><i class="dot in"></i>Ganhos <b id="plan-sum-planejado">R$ 0,00</b></span>
+              <span class="pl-hero-stat"><i class="dot out"></i>Gastos <b id="plan-sum-gasto">R$ 0,00</b></span>
+            </div>
           </div>
           <div class="section-head">
             <h3>Itens do mês</h3>
@@ -605,32 +606,27 @@
         <label class="checkbox-row" style="margin-top:14px">
           <input type="checkbox" id="cfg-modo-escuro"> Modo escuro
         </label>
-        <div class="danger-zone">
-          <label>Zona de perigo <span class="cfg-hint">apaga transações, planejamento, metas, categorias criadas e investimentos. Sua conta e os bancos conectados continuam.</span></label>
-          <button type="button" class="btn-danger-outline" id="btn-apagar-tudo">Apagar todos os dados do app</button>
-        </div>
         <button class="btn btn-primary" id="btn-salvar-config" style="margin-top:16px">Salvar</button>
       </div>
     </div>
   </div>
 
-  <!-- ===================== APAGAR TUDO (modal) ===================== -->
-  <div class="modal-overlay" id="modal-apagar-tudo">
-    <div class="modal-card">
+  <!-- ===================== TUTORIAL (modal) ===================== -->
+  <div class="modal-overlay" id="modal-tutorial">
+    <div class="modal-card tut-card">
       <div class="modal-head">
-        <h3>Apagar todos os dados?</h3>
-        <button class="icon-btn" data-close-modal>&times;</button>
+        <h3>Tutorial do Fluxo</h3>
+        <button class="icon-btn" data-close-modal aria-label="Fechar">&times;</button>
+      </div>
+      <div class="segmented tut-tabs" id="tut-tabs">
+        <button type="button" class="seg-btn active" data-tuttab="passos">Passo a passo</button>
+        <button type="button" class="seg-btn" data-tuttab="guia">Guia</button>
       </div>
       <div class="modal-body">
-        <p class="del-card-text">Isso apaga transações, planejamento, metas, categorias criadas e investimentos, em todos os seus aparelhos. Sua conta e os bancos conectados continuam. <b>Não dá para desfazer.</b></p>
-        <label for="apagar-confirm">Digite <b>APAGAR</b> para confirmar</label>
-        <input type="text" id="apagar-confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="APAGAR">
-        <div class="del-sim-actions">
-          <button class="btn btn-danger" type="button" id="btn-confirmar-apagar" disabled>Apagar tudo</button>
-          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
-        </div>
+        <div id="tut-passos"></div>
+        <div id="tut-guia" class="hidden"></div>
       </div>
-    </div>
+  </div>
   </div>
 
   <!-- ===================== PERFIL (modal, estilo menu lateral) ===================== -->

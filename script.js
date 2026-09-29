@@ -372,10 +372,8 @@ let delSimId = null;
 let planMonth = null;   // "AAAA-MM" mostrado na aba Planejamento
 let planMode = "futuros"; // "futuros" | "metas"
 let editingPlanId = null;
-let esView = "dia";          // Entradas/Saídas: "dia" | "categoria"
 const ES_PAGE = 60;
 let esVisibleCount = ES_PAGE;
-const esOpenCats = new Set(); // categorias abertas na visão por categoria
 const metaOpen = new Set();   // categorias com a lista de subtítulos aberta (Metas)
 let payPlanId = null;
 let editingGoalCategory = null;
@@ -578,6 +576,7 @@ function showApp() {
   const last = localStorage.getItem("lastScreen");
   navigateTo(last && NAV_DEFS[last] ? last : "inicio", { refresh: last && NAV_DEFS[last] && last !== "inicio" });
   setTimeout(checkReviewPrompt, 700);
+  setTimeout(maybeAutoTutorial, 1800);
   setTimeout(() => autoSyncAll(), 2500);
 }
 const BRAND_HTML = '<span class="brand"><img class="brand-mark" src="icon-192.png" alt="" width="26" height="26"><span class="brand-name">Fluxo</span></span>';
@@ -684,7 +683,7 @@ function saveFilters() {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({
       dashPeriodo: dashFilterPeriodo, dashBanco: dashFilterBanco,
       txPeriodo: txFilterPeriodo, txBanco: txFilterBanco, txTipo: txFilterTipo, txCategoria: txFilterCategoria, txSearch,
-      sort: sortMode, esTipo, esView, catSegment, catMode, planMode
+      sort: sortMode, esTipo, catSegment, catMode, planMode
     }));
   } catch (e) { /* armazenamento indisponível: segue sem salvar */ }
 }
@@ -704,7 +703,6 @@ function loadSavedFilters() {
   txSearch = typeof sv.txSearch === "string" ? sv.txSearch.slice(0, 80) : "";
   if (sv.sort && typeof sv.sort === "object") ["tx", "es", "catdet"].forEach(k => { if (SORT_CYCLE.includes(sv.sort[k])) sortMode[k] = sv.sort[k]; });
   esTipo = oneOf(sv.esTipo, ["entrada", "saida"]) || esTipo;
-  esView = oneOf(sv.esView, ["dia", "categoria"]) || esView;
   catSegment = oneOf(sv.catSegment, ["gastos", "ganhos"]) || catSegment;
   catMode = oneOf(sv.catMode, ["cats", "comparar"]) || catMode;
   planMode = oneOf(sv.planMode, ["futuros", "metas"]) || planMode;
@@ -837,93 +835,55 @@ function toggleHideValues() {
 }
 function openEntradasSaidas(tipo) {
   if (valuesHidden()) { showToast("Valores escondidos. Toque no olho para mostrar."); return; }
-  esTipo = tipo; esVisibleCount = ES_PAGE; esOpenCats.clear();
+  esTipo = tipo; esVisibleCount = ES_PAGE;
   navigateTo("entradas-saidas", { refresh: false });
 }
 function esPeriodLabel() {
-  if (dashFilterPeriodo === "all") return "todo o período";
+  if (dashFilterPeriodo === "all") return "Todo o período";
   return monthLabel(dashFilterPeriodo === "current" ? curYm() : dashFilterPeriodo);
 }
-function esByDayHtml(all, isIn) {
-  const txs = all.slice(0, esVisibleCount);
-  const sign = isIn ? "+ " : "- ";
-  let html = "";
-  if (sortMode.es === "recent") {
-    const dayTotals = {};
-    all.forEach(t => { const d = t.date.slice(0, 10); dayTotals[d] = (dayTotals[d] || 0) + Math.abs(t.value); });
-    const days = [];
-    txs.forEach(t => {
-      const d = t.date.slice(0, 10);
-      let g = days[days.length - 1];
-      if (!g || g.day !== d) { g = { day: d, items: [] }; days.push(g); }
-      g.items.push(t);
-    });
-    let curMonth = null;
-    days.forEach(g => {
-      const mo = g.day.slice(0, 7);
-      if (mo !== curMonth) { curMonth = mo; html += `<div class="tx-month-label">${monthLabel(mo)}</div>`; }
-      html += `<div class="tx-day-label es-day-head"><span>${esc(txDayLabel(g.day))}</span><span class="es-day-total ${isIn ? "pos" : "neg"}">${sign}${fmtBRL(dayTotals[g.day])}</span></div>` +
-        `<div class="tx-group">${g.items.map(t => txRowHtml(t)).join("")}</div>`;
-    });
-  } else {
-    html = `<div class="tx-group">${txs.map(t => txRowHtml(t)).join("")}</div>`;
-  }
-  html += `<div class="tx-count-label">Mostrando ${txs.length} de ${all.length}</div>`;
-  if (all.length > esVisibleCount) html += `<button type="button" class="btn btn-outline" id="btn-load-more-es">Carregar mais</button>`;
-  return html;
-}
-function esByCategoryHtml(txs, total, isIn) {
-  const byCat = {};
-  txs.forEach(t => {
-    const id = effectiveCategory(t);
-    const g = byCat[id] || (byCat[id] = { id, items: [], total: 0 });
-    g.items.push(t); g.total += Math.abs(t.value);
+// Lista separada por dia (um cartão por dia). Em "maior/menor valor" os dias continuam separados:
+// cada dia aparece na posição da sua transação de maior/menor valor, e dentro do dia vale a ordenação escolhida.
+// isIn: true/false mostra o total do dia (só entradas ou só saídas); null não mostra total.
+function daysHtml(txs, { isIn = null, months = true, all = null } = {}) {
+  const order = [], map = {}, totals = {};
+  txs.forEach(t => { const d = t.date.slice(0, 10); if (!map[d]) { map[d] = []; order.push(d); } map[d].push(t); });
+  (all || txs).forEach(t => { const d = t.date.slice(0, 10); totals[d] = (totals[d] || 0) + Math.abs(t.value); });
+  let html = "", curMonth = null;
+  order.forEach(d => {
+    const mo = d.slice(0, 7);
+    if (months && mo !== curMonth) { curMonth = mo; html += `<div class="tx-month-label">${monthLabel(mo)}</div>`; }
+    const total = isIn === null ? "" : `<span class="es-day-total ${isIn ? "pos" : "neg"}">${isIn ? "+ " : "- "}${fmtBRL(totals[d])}</span>`;
+    html += `<div class="tx-day-label es-day-head"><span>${esc(txDayLabel(d))}</span>${total}</div>` +
+      `<div class="tx-group">${map[d].map(t => txRowHtml(t)).join("")}</div>`;
   });
-  const groups = Object.values(byCat).sort((a, b) => sortMode.es === "low" ? a.total - b.total : b.total - a.total);
-  const sign = isIn ? "+ " : "- ";
-  return groups.map(g => {
-    const info = catInfo(g.id), open = esOpenCats.has(g.id);
-    const pct = total ? (g.total / total) * 100 : 0;
-    const shown = g.items.slice(0, 40);
-    const body = open
-      ? `<div class="es-cat-body"><div class="tx-group">${shown.map(t => txRowHtml(t)).join("")}</div>${g.items.length > shown.length ? `<div class="tx-count-label">Mostrando ${shown.length} de ${g.items.length} — veja todas em Transações</div>` : ""}</div>`
-      : "";
-    return `<div class="es-cat${open ? " open" : ""}" style="--c:${esc(info.color || "#64748B")}">
-      <div class="es-cat-head" role="button" tabindex="0" aria-expanded="${open}" data-es-cat-toggle="${esc(g.id)}">
-        <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
-        <div class="es-cat-main">
-          <div class="es-cat-name">${esc(info.name)}<span class="es-cat-count">${g.items.length}</span></div>
-          <div class="es-cat-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%"></i></div>
-        </div>
-        <div class="es-cat-right">
-          <div class="es-cat-total ${isIn ? "pos" : "neg"}">${sign}${fmtBRL(g.total)}</div>
-          <div class="es-cat-pct">${pct.toFixed(1).replace(".", ",")}%</div>
-        </div>
-        <svg class="es-cat-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      </div>${body}</div>`;
-  }).join("");
+  return html;
 }
 function renderEntradasSaidas() {
   saveFilters();
   const tipo = esTipo, isIn = tipo === "entrada";
   document.getElementById("topbar-title").textContent = isIn ? "Entradas" : "Saídas";
-  document.querySelectorAll("#es-view .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.esview === esView));
   renderSortSlot("es-sort-slot", "es");
   const base = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
     .filter(t => !isCreditTx(t) && t.type === tipo);
   const total = base.reduce((s, t) => s + Math.abs(t.value), 0);
   const sum = document.getElementById("es-summary");
   sum.className = "es-summary " + (isIn ? "in" : "out");
-  sum.innerHTML = `<div class="es-sum-label">${isIn ? "Total de entradas" : "Total de saídas"}</div>` +
-    `<div class="es-sum-value">${isIn ? "+ " : "- "}${fmtBRL(total)}</div>` +
-    `<div class="es-sum-sub">${base.length} ${base.length === 1 ? "movimentação" : "movimentações"} · ${esc(esPeriodLabel())}</div>`;
+  sum.innerHTML = `<span class="es-sum-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${isIn ? '<path d="M7 17L17 7M8 7h9v9"/>' : '<path d="M17 7L7 17M16 17H7V8"/>'}</svg></span>` +
+    `<div class="es-sum-body"><div class="es-sum-label">${isIn ? "Total de entradas" : "Total de saídas"}</div>` +
+    `<div class="es-sum-value">${fmtBRL(total)}</div>` +
+    `<div class="es-sum-sub">${base.length} ${base.length === 1 ? "movimentação" : "movimentações"} · ${esc(esPeriodLabel())}</div></div>`;
   const container = document.getElementById("es-list-container");
   if (!base.length) {
     container.innerHTML = `<div class="empty-state">Nenhuma ${isIn ? "entrada" : "saída"} no período.</div>`;
     return;
   }
-  const txs = sortTxs(base, sortMode.es);
-  container.innerHTML = esView === "categoria" ? esByCategoryHtml(txs, total, isIn) : esByDayHtml(txs, isIn);
+  const sorted = sortTxs(base, sortMode.es);
+  const shown = sorted.slice(0, esVisibleCount);
+  let html = daysHtml(shown, { isIn, months: sortMode.es === "recent", all: sorted });
+  html += `<div class="tx-count-label">Mostrando ${shown.length} de ${sorted.length}</div>`;
+  if (sorted.length > esVisibleCount) html += `<button type="button" class="btn btn-outline" id="btn-load-more-es">Carregar mais</button>`;
+  container.innerHTML = html;
 }
 
 /* ============================================================
@@ -1211,72 +1171,52 @@ function renderPlanejamento(force = false) {
 }
 function planItemRowHtml(p) {
   const isIn = p.type === "entrada";
-  return `
-    <div class="plan-row ${p.paid ? "paid" : ""}" data-plan-id="${p.id}">
-      <div class="plan-row-top">
-        <div class="plan-row-main">
-          <div class="plan-row-name">${esc(p.name)}${p.paid ? `<span class="plan-row-badge">${ICONS.check(11)} Pago</span>` : ""}</div>
-          <div class="plan-row-sub">${isIn ? "Ganho" : "Gasto"} planejado${p.day ? ` · dia ${p.day}` : ""}</div>
-        </div>
-        <div class="plan-row-value ${isIn ? "pos" : "neg"}">${isIn ? "+" : "-"} ${fmtBRL(p.value)}</div>
-      </div>
-      <div class="plan-row-actions">
-        ${p.paid
-          ? `<button type="button" class="btn-outline" data-plan-unpay="${p.id}">Desfazer</button>`
-          : `<button type="button" class="btn-pay" data-plan-pay="${p.id}">${ICONS.check(14)} Marcar como pago</button>
-             <button type="button" class="icon-btn" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(15)}</button>`}
-        <button type="button" class="icon-btn" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(15)}</button>
-      </div>
-    </div>`;
+  const meta = [p.subtitle ? esc(p.subtitle) : "", p.day ? `dia ${p.day}` : ""].filter(Boolean).join(" · ");
+  return `<div class="pl-item${p.paid ? " paid" : ""}" data-plan-id="${p.id}">
+    <button type="button" class="pl-check" ${p.paid ? `data-plan-unpay="${p.id}" aria-label="Desfazer pagamento" title="Desfazer pagamento"` : `data-plan-pay="${p.id}" aria-label="Marcar como pago" title="Marcar como pago"`}>${p.paid ? ICONS.check(14) : ""}</button>
+    <div class="pl-item-main"><div class="pl-item-name">${esc(p.name)}</div>${meta ? `<div class="pl-item-meta">${meta}</div>` : ""}</div>
+    <div class="pl-item-value ${isIn ? "pos" : ""}">${isIn ? "+ " : ""}${fmtBRL(p.value)}</div>
+    <div class="pl-item-actions">
+      ${p.paid ? "" : `<button type="button" class="pl-ghost" data-plan-edit="${p.id}" aria-label="Editar">${ICONS.pencil(14)}</button>`}
+      <button type="button" class="pl-ghost" data-plan-del="${p.id}" aria-label="Excluir">${ICONS.trash(14)}</button>
+    </div>
+  </div>`;
 }
 function renderPlanFuturos() {
   document.getElementById("plan-month-label").innerHTML = monthLabelWithTag(planMonth);
-  // O planejamento é um mundo à parte: ignora completamente o saldo real da conta
-  // (transações de verdade). Cada mês começa "zerado" e o resultado vem só do que
-  // foi planejado (e do que já foi de fato marcado como pago) dentro da própria aba.
+  // O planejamento é um mundo à parte: ignora o saldo real da conta. Cada mês começa zerado.
   const items = planItemsCache.filter(p => p.month === planMonth).sort((a, b) => (a.paid - b.paid) || ((a.day || 99) - (b.day || 99)) || (a.id - b.id));
-  const ganhoPlanejado = items.filter(p => p.type === "entrada").reduce((s, p) => s + p.value, 0);
-  const gastoPlanejado = items.filter(p => p.type === "saida").reduce((s, p) => s + p.value, 0);
-  const resultado = ganhoPlanejado - gastoPlanejado;
-  countTo(document.getElementById("plan-sum-planejado"), ganhoPlanejado);
-  countTo(document.getElementById("plan-sum-gasto"), gastoPlanejado);
-  const resEl = document.getElementById("plan-sum-resta");
-  countTo(resEl, Math.abs(resultado));
-  const resCard = document.getElementById("plan-sum-resta-card");
-  resCard.classList.toggle("card-green", resultado >= 0);
-  resCard.classList.toggle("card-red", resultado < 0);
-  document.getElementById("plan-sum-resta-label").textContent = resultado >= 0 ? "Lucro do mês" : "Prejuízo do mês";
+  const ganho = items.filter(p => p.type === "entrada").reduce((s, p) => s + p.value, 0);
+  const gasto = items.filter(p => p.type === "saida").reduce((s, p) => s + p.value, 0);
+  const resultado = ganho - gasto;
+  countTo(document.getElementById("plan-sum-planejado"), ganho);
+  countTo(document.getElementById("plan-sum-gasto"), gasto);
+  countTo(document.getElementById("plan-sum-resta"), Math.abs(resultado));
+  const hero = document.getElementById("plan-sum-resta-card");
+  hero.classList.toggle("neg", resultado < 0);
+  hero.classList.toggle("pos", resultado >= 0);
+  document.getElementById("plan-sum-resta-label").textContent = resultado >= 0 ? "Sobra prevista do mês" : "Faltam no mês";
+  const barPct = ganho > 0 ? Math.min(100, (gasto / ganho) * 100) : (gasto > 0 ? 100 : 0);
+  const bar = document.getElementById("plan-bar-gasto");
+  bar.style.width = barPct.toFixed(1) + "%";
+  bar.parentElement.classList.toggle("over", gasto > ganho);
   const el = document.getElementById("plan-list");
-  if (!items.length) { el.innerHTML = `<div class="empty-state">Nada planejado para ${esc(monthLabel(planMonth))} ainda.</div>`; return; }
+  if (!items.length) { el.innerHTML = `<div class="empty-state">Nada planejado para ${esc(monthLabel(planMonth))} ainda.<br>Toque em <b>Novo</b> para começar.</div>`; return; }
 
-  // Agrupa por categoria > subtítulo, pra somar Mercado + Shopping e bater com o total de Compras.
-  const semCategoria = items.filter(p => !p.category);
-  const porCategoria = {};
-  items.filter(p => p.category).forEach(p => { (porCategoria[p.category] = porCategoria[p.category] || []).push(p); });
-
-  let html = "";
-  let rowIdx = 0;
-  const withDelay = (h) => { const out = h.replace("class=\"plan-row", `style="animation-delay:${(rowIdx * 0.045).toFixed(3)}s" class="plan-row`); rowIdx++; return out; };
-  if (semCategoria.length) html += `<div class="plan-cat-group plain">${semCategoria.map(planItemRowHtml).map(withDelay).join("")}</div>`;
-  html += Object.keys(porCategoria).sort((a, b) => catInfo(a).name.localeCompare(catInfo(b).name)).map((catId, gi) => {
-    const catItems = porCategoria[catId];
-    const info = catInfo(catId);
-    const total = catItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
-    const semSub = catItems.filter(p => !p.subtitle);
-    const porSub = {};
-    catItems.filter(p => p.subtitle).forEach(p => { (porSub[p.subtitle] = porSub[p.subtitle] || []).push(p); });
-    const subHtml = Object.keys(porSub).sort().map(sub => {
-      const subItems = porSub[sub];
-      const subTotal = subItems.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
-      return `<div class="plan-subtitle-head"><span>${ICONS.tag(12)} ${esc(sub)}</span>${subItems.length > 1 ? `<b>${fmtBRL(Math.abs(subTotal))}</b>` : ""}</div>${subItems.map(planItemRowHtml).map(withDelay).join("")}`;
-    }).join("");
-    return `<div class="plan-cat-group" style="animation-delay:${(gi * 0.06).toFixed(3)}s">
-      <div class="plan-cat-head"><span class="cat-icon" style="background:${info.color}">${info.icon}</span><span class="plan-cat-name">${esc(info.name)}</span><b class="plan-cat-total ${total >= 0 ? "pos" : "neg"}">${fmtBRL(Math.abs(total))}</b></div>
-      ${semSub.map(planItemRowHtml).map(withDelay).join("")}
-      ${subHtml}
+  const groups = {};
+  items.forEach(p => { const k = p.category || "__sem"; (groups[k] = groups[k] || []).push(p); });
+  const keys = Object.keys(groups).sort((a, b) => (a === "__sem") - (b === "__sem") || (a === "__sem" ? 0 : catInfo(a).name.localeCompare(catInfo(b).name)));
+  el.innerHTML = keys.map((k, gi) => {
+    const list = groups[k];
+    const info = k === "__sem" ? { name: "Sem categoria", icon: "🗂️", color: "#64748B" } : catInfo(k);
+    const total = list.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
+    const done = list.filter(p => p.paid).length;
+    return `<div class="pl-cat" style="--c:${esc(info.color || "#64748B")};animation-delay:${(gi * 0.05).toFixed(3)}s">
+      <div class="pl-cat-head"><span class="pl-cat-ico">${info.icon}</span><span class="pl-cat-name">${esc(info.name)}</span>
+        <span class="pl-cat-done">${done}/${list.length}</span><b class="pl-cat-total">${total < 0 ? "- " : ""}${fmtBRL(Math.abs(total))}</b></div>
+      ${list.map(planItemRowHtml).join("")}
     </div>`;
   }).join("");
-  el.innerHTML = html;
 }
 // Animação ao trocar de mês: só o conteúdo desliza (as setinhas ficam paradas) e os valores sobem de novo.
 function animateMonthChange(wrapId, delta) {
@@ -1692,7 +1632,7 @@ function renderCategoriaDetalhe() {
     <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"} • ${esc(monthLabel(ym))}</div></div>
     <div class="cat-amount catdet-total ${isGasto ? "neg" : "pos"}">${fmtBRL(total)}</div>
   </div>`;
-  el.innerHTML = head + (txs.length ? sortBtnHtml("catdet") + `<div class="es-bank-group">${txs.map(t => txRowHtml(t)).join("")}</div>` : `<div class="empty-state">Nenhuma transação nesta categoria neste mês.</div>`);
+  el.innerHTML = head + (txs.length ? sortBtnHtml("catdet") + daysHtml(txs, { isIn: !isGasto, months: false }) : `<div class="empty-state">Nenhuma transação nesta categoria neste mês.</div>`);
 }
 
 /* ============================================================
@@ -1838,22 +1778,8 @@ function renderTransacoes() {
   const txs = allTxs.slice(0, txVisibleCount);
   // por data: título do mês, título do dia e um cartão contínuo com as transações do dia.
   // por valor: um único cartão (os dias ficariam embaralhados)
-  let html = "";
-  if (sortMode.tx === "recent") {
-    let curMonth = null, curDay = null, buf = "";
-    const flush = () => { if (buf) html += `<div class="tx-day-label">${esc(txDayLabel(curDay))}</div><div class="tx-group">${buf}</div>`; buf = ""; };
-    txs.forEach(t => {
-      const day = t.date.slice(0, 10), mo = day.slice(0, 7);
-      if (day !== curDay) {
-        flush(); curDay = day;
-        if (mo !== curMonth) { curMonth = mo; html += `<div class="tx-month-label">${monthLabel(mo)}</div>`; }
-      }
-      buf += txRowHtml(t);
-    });
-    flush();
-  } else {
-    html = `<div class="tx-group">${txs.map(t => txRowHtml(t)).join("")}</div>`;
-  }
+  // sempre separado por dia; em "maior/menor valor" a ordenação vale dentro de cada dia
+  let html = daysHtml(txs, { months: sortMode.tx === "recent" });
   html += `<div class="tx-count-label">Mostrando ${txs.length} de ${allTxs.length} transações</div>`;
   if (allTxs.length > txVisibleCount) {
     html += `<button class="btn btn-outline" id="btn-load-more-tx">Carregar mais</button>`;
@@ -2410,7 +2336,7 @@ async function logoutUser() {
   sortMode = { tx: "recent", es: "recent", catdet: "recent" }; planLoadedAt = 0; lastDataFetch = 0;
   localStorage.removeItem("lastScreen");
   localStorage.removeItem(FILTERS_KEY);
-  esTipo = "entrada"; esView = "dia"; catSegment = "gastos"; catMode = "cats"; planMode = "futuros"; esOpenCats.clear(); metaOpen.clear();
+  esTipo = "entrada"; catSegment = "gastos"; catMode = "cats"; planMode = "futuros"; metaOpen.clear();
   syncSig = null;
   closeAllModals();
   showLogin();
@@ -2826,24 +2752,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const openCat = (e) => { const r = e.target.closest("[data-cat]"); if (r) openCategoriaDetalhe(r.dataset.cat); };
     document.getElementById("categorias-list").addEventListener("click", openCat);
     document.getElementById("cat-legend").addEventListener("click", openCat);
-    document.getElementById("es-view").addEventListener("click", (e) => {
-      const b = e.target.closest("[data-esview]"); if (!b) return;
-      esView = b.dataset.esview; esVisibleCount = ES_PAGE;
-      renderEntradasSaidas();
-    });
-    document.getElementById("es-list-container").addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      const tg = e.target.closest("[data-es-cat-toggle]"); if (!tg) return;
-      e.preventDefault(); tg.click();
-    });
     document.getElementById("es-list-container").addEventListener("click", (e) => {
       if (e.target.closest("#btn-load-more-es")) { esVisibleCount += ES_PAGE; renderEntradasSaidas(); return; }
-      const tg = e.target.closest("[data-es-cat-toggle]");
-      if (tg) {
-        const id = tg.dataset.esCatToggle;
-        if (esOpenCats.has(id)) esOpenCats.delete(id); else esOpenCats.add(id);
-        renderEntradasSaidas(); return;
-      }
       const row = e.target.closest("[data-tx-id]");
       if (row) openTxDetalhe(row.dataset.txId);
     });
@@ -3267,30 +3177,135 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 window.addEventListener("online", () => syncCheck());
 window.addEventListener("focus", () => setTimeout(syncCheck, 300));
 
+
+
 /* ============================================================
-   APAGAR TUDO (Configurações → Zona de perigo)
+   TUTORIAL DO APP
+   - "Passo a passo": telas que você avança (abre sozinho na 1ª vez).
+   - "Guia": seções que abrem e fecham, para consultar quando quiser.
+   Botão em Créditos › Como usar o Fluxo.
    ============================================================ */
+const TUT_KEY = "fluxo_tutorial_visto";
+const TUT_STEPS = [
+  { ico: "👋", t: "Bem-vindo ao Fluxo", p: "Seu dinheiro, em movimento. Em poucos passos você vê como o app junta seus bancos, organiza seus gastos e ajuda a planejar o mês.",
+    b: ["Abas de baixo: Início, Transações, Investimentos, Categorias e Planejamento", "Deslize para os lados para trocar de aba", "Você revê este tutorial quando quiser em Créditos"] },
+  { ico: "🏦", t: "Conecte seus bancos", p: "Toque na sua foto (canto de cima) e abra Minhas instituições.",
+    b: ["Toque em Conectar banco real (Pluggy) e siga os passos do banco", "O app só lê os dados: nunca guarda a sua senha", "Use Sincronizar todos os bancos para buscar novidades", "Dá para conectar contas de mais de um CPF"] },
+  { ico: "🏠", t: "Início", p: "Sua visão geral: saldo total, quanto entrou e quanto saiu.",
+    b: ["O olho esconde os valores na hora, útil em público", "Os filtros de cima escolhem o período e o banco", "Seus bancos e cartões aparecem logo abaixo"] },
+  { ico: "↕️", t: "Entradas e Saídas", p: "No Início, toque em Entradas ou em Saídas para ver a lista completa.",
+    b: ["Tudo separado por dia, com o total de cada dia", "O botão de ordenação coloca os maiores valores primeiro, sem misturar os dias", "Toque numa movimentação para ver os detalhes"] },
+  { ico: "🧾", t: "Transações", p: "Todas as movimentações em um só lugar, separadas por dia.",
+    b: ["Busque pelo nome e use o ícone de filtro para período, banco, tipo e categoria", "Toque numa transação para ver detalhes, trocar a categoria ou excluir", "Categorias com o selo IA foram sugeridas automaticamente: confirme ou corrija"] },
+  { ico: "🍩", t: "Categorias", p: "Veja para onde o dinheiro foi (Gastos) e de onde ele veio (Ganhos).",
+    b: ["As setas trocam de mês", "Toque numa categoria para ver as transações dela, por dia", "Em Comparar meses você vê a diferença entre dois meses"] },
+  { ico: "📈", t: "Investimentos", p: "Acompanhe o que está aplicado e quanto rendeu.",
+    b: ["Aplicado, Valor atual e Rendeu no topo", "A barra colorida mostra quanto está em cada banco", "Rendeu = valor de hoje menos o que você aplicou"] },
+  { ico: "🗓️", t: "Planejamento", p: "Anote os gastos e ganhos que ainda vão acontecer no mês.",
+    b: ["Toque em Novo para planejar um item", "Toque no círculo do item para marcar como pago (toque de novo para desfazer)", "Isso vale só para o planejamento e não mexe no saldo real da conta"] },
+  { ico: "🎯", t: "Metas por categoria", p: "Em Planejamento, abra Metas por categoria e defina quanto quer gastar em cada uma.",
+    b: ["A barra mostra o que já foi pago dentro do que foi planejado", "Ver por subtítulo mostra cada item, com check e riscado quando pago", "Metas fixas valem todo mês; ou escolha meses específicos"] },
+  { ico: "⚙️", t: "Deixe do seu jeito", p: "No menu da sua foto, abra Configurações.",
+    b: ["Escolha a cor do app e o modo escuro", "Mude a ordem das abas de baixo e esconda as que não usa", "Nomes bloqueados: desbloqueie transações que você excluiu por engano", "Seus filtros e preferências ficam salvos ao recarregar"] }
+];
+const TUT_GUIDE = [
+  { ico: "🏦", t: "Primeiros passos", items: [
+    "Toque na sua foto, abra Minhas instituições e conecte o banco pelo Pluggy (Open Finance).",
+    "O app só lê os dados, nunca guarda a sua senha.",
+    "Depois de conectar, use Sincronizar todos os bancos para trazer as transações.",
+    "O app também sincroniza sozinho de vez em quando."] },
+  { ico: "🏠", t: "Início", items: [
+    "Saldo total no topo. O olho esconde ou mostra os valores.",
+    "Os cartões Entradas e Saídas abrem a lista completa, separada por dia.",
+    "Filtros de período e banco ficam salvos quando você recarrega a página.",
+    "Seus bancos e cartões aparecem mais abaixo. Toque num cartão para ver as transações dele."] },
+  { ico: "🧾", t: "Transações", items: [
+    "Sempre separadas por dia.",
+    "Busca pelo nome e filtro por período, banco, tipo e categoria (ícone ao lado da busca).",
+    "O botão de ordenação alterna entre mais recentes, maior valor e menor valor. Os dias continuam separados.",
+    "Toque numa transação: detalhes, Alterar categoria ou Excluir.",
+    "Ao trocar a categoria, o app pode aplicar a mesma escolha em transações parecidas.",
+    "Ao excluir, o app pergunta se quer excluir também as parecidas e bloquear o nome. Dá para desfazer em Configurações › Nomes bloqueados."] },
+  { ico: "🍩", t: "Categorias", items: [
+    "Alterne entre Gastos e Ganhos. As setas trocam de mês.",
+    "Toque numa categoria para ver as transações dela, separadas por dia.",
+    "Comparar meses mostra a diferença entre dois meses.",
+    "Você pode criar, editar e excluir categorias ao escolher a categoria de uma transação."] },
+  { ico: "📈", t: "Investimentos", items: [
+    "Total investido, quanto foi aplicado e quanto rendeu.",
+    "A barra colorida mostra a divisão entre os bancos.",
+    "Cada banco lista os investimentos com o valor aplicado e o rendimento."] },
+  { ico: "🗓️", t: "Planejamento: gastos futuros", items: [
+    "Use as setas para escolher o mês. Cada mês começa zerado.",
+    "O resumo mostra o que sobra (ou falta) e a divisão entre ganhos e gastos planejados.",
+    "Novo cria um item. O lápis edita e a lixeira exclui.",
+    "O círculo marca como pago. Toque de novo para desfazer.",
+    "Nada disso altera o saldo real da conta."] },
+  { ico: "🎯", t: "Planejamento: metas por categoria", items: [
+    "Defina quanto quer gastar por categoria no mês.",
+    "A barra escura mostra o que foi pago e a clara mostra o planejado.",
+    "Ver por subtítulo abre os itens: pagos ficam com check e riscados.",
+    "Meta fixa vale todo mês; meses específicos valem só para os meses escolhidos."] },
+  { ico: "⚙️", t: "Configurações e dicas", items: [
+    "Cor do app, modo escuro e ordem das abas de baixo.",
+    "Nomes bloqueados: desbloqueie o que foi excluído por engano.",
+    "Se algo parecer desatualizado, feche e abra o app ou recarregue a página.",
+    "Este tutorial fica sempre disponível em Créditos."] }
+];
+let tutIdx = 0;
+function tutStepHtml() {
+  const st = TUT_STEPS[tutIdx], last = tutIdx === TUT_STEPS.length - 1;
+  return `<div class="tut-slide" key="${tutIdx}">
+      <div class="tut-ico" aria-hidden="true">${st.ico}</div>
+      <h4 class="tut-title">${st.t}</h4>
+      <p class="tut-text">${st.p}</p>
+      <ul class="tut-list">${st.b.map(x => `<li>${x}</li>`).join("")}</ul>
+    </div>
+    <div class="tut-dots" role="tablist">${TUT_STEPS.map((_, i) => `<button type="button" class="tut-dot${i === tutIdx ? " on" : ""}" data-tut-go="${i}" aria-label="Passo ${i + 1}"></button>`).join("")}</div>
+    <div class="tut-nav">
+      <button type="button" class="btn btn-outline tut-prev"${tutIdx === 0 ? " disabled" : ""} data-tut-prev>Voltar</button>
+      <span class="tut-count">${tutIdx + 1} de ${TUT_STEPS.length}</span>
+      <button type="button" class="btn btn-primary tut-next" data-tut-next>${last ? "Concluir" : "Próximo"}</button>
+    </div>`;
+}
+function renderTutorial() {
+  document.getElementById("tut-passos").innerHTML = tutStepHtml();
+  const g = document.getElementById("tut-guia");
+  if (!g.dataset.ready) {
+    g.innerHTML = TUT_GUIDE.map(sec => `<details class="tut-sec"><summary><span class="tut-sec-ico">${sec.ico}</span><span>${sec.t}</span></summary><ul>${sec.items.map(x => `<li>${x}</li>`).join("")}</ul></details>`).join("");
+    g.dataset.ready = "1";
+  }
+}
+function tutTab(tab) {
+  document.querySelectorAll("#tut-tabs .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.tuttab === tab));
+  document.getElementById("tut-passos").classList.toggle("hidden", tab !== "passos");
+  document.getElementById("tut-guia").classList.toggle("hidden", tab !== "guia");
+}
+function openTutorial(tab = "passos") {
+  try { localStorage.setItem(TUT_KEY, "1"); } catch (e) { /* sem armazenamento: só não lembra que já viu */ }
+  tutIdx = 0;
+  renderTutorial(); tutTab(tab);
+  openModal("modal-tutorial");
+  const body = document.querySelector("#modal-tutorial .modal-body"); if (body) body.scrollTop = 0;
+}
+function maybeAutoTutorial() {
+  let seen = "1";
+  try { seen = localStorage.getItem(TUT_KEY); } catch (e) { /* ignora */ }
+  if (seen || !state.user) return;
+  if (document.querySelector(".modal-overlay.active")) return; // não atropela outro aviso aberto
+  openTutorial("passos");
+}
 document.addEventListener("DOMContentLoaded", () => {
-  const input = document.getElementById("apagar-confirm");
-  const btn = document.getElementById("btn-confirmar-apagar");
-  const open = document.getElementById("btn-apagar-tudo");
-  if (!input || !btn || !open) return;
-  open.addEventListener("click", () => { input.value = ""; btn.disabled = true; openModal("modal-apagar-tudo"); setTimeout(() => input.focus(), 250); });
-  input.addEventListener("input", () => { btn.disabled = input.value.trim().toUpperCase() !== "APAGAR"; });
-  btn.addEventListener("click", () => {
-    if (input.value.trim().toUpperCase() !== "APAGAR") return;
-    withLoading(btn, async () => {
-      try {
-        await api("/me/data", { method: "DELETE", body: { confirm: "APAGAR" } });
-        state.transactions = []; state.customCategories = []; state.categoryOverrides = {}; state.investments = []; state.investHistory = [];
-        planItemsCache = []; goalsCache = []; subtitlesCache = [];
-        txVisibleCount = TX_PAGE_SIZE; catDetalhe = null;
-        await Promise.all([refreshTransactions(), refreshCategories(), refreshInvestments(), loadPlanData()]);
-        lastDataFetch = Date.now(); planLoadedAt = Date.now();
-        closeAllModals();
-        navigateTo("inicio", { refresh: false });
-        showToast("Tudo apagado. Sua conta e os bancos conectados continuam.");
-      } catch (e) { showToast("Não foi possível apagar: " + e.message, { error: true }); }
+  wire(() => {
+    document.getElementById("btn-tutorial").addEventListener("click", () => openTutorial("passos"));
+    document.getElementById("tut-tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tuttab]"); if (b) tutTab(b.dataset.tuttab); });
+    document.getElementById("tut-passos").addEventListener("click", (e) => {
+      if (e.target.closest("[data-tut-next]")) {
+        if (tutIdx >= TUT_STEPS.length - 1) { closeAllModals(); return; }
+        tutIdx++; renderTutorial(); return;
+      }
+      if (e.target.closest("[data-tut-prev]")) { if (tutIdx > 0) { tutIdx--; renderTutorial(); } return; }
+      const go = e.target.closest("[data-tut-go]"); if (go) { tutIdx = Number(go.dataset.tutGo) || 0; renderTutorial(); }
     });
-  });
+  }, "tutorial");
 });
