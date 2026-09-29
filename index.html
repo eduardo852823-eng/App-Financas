@@ -152,6 +152,12 @@
 
       <!-- ---------- ENTRADAS / SAÍDAS (detalhe) ---------- -->
       <section class="screen screen-entradas-saidas" data-screen="entradas-saidas">
+        <div class="es-summary in" id="es-summary"></div>
+        <div class="segmented es-view" id="es-view">
+          <button type="button" class="seg-btn active" data-esview="dia">Por dia</button>
+          <button type="button" class="seg-btn" data-esview="categoria">Por categoria</button>
+        </div>
+        <div id="es-sort-slot"></div>
         <div id="es-list-container"></div>
       </section>
 
@@ -303,6 +309,8 @@
           <div class="card-balance-value" id="inv-total">R$ 0,00</div>
           <div class="card-balance-sub" id="inv-change">—</div>
         </div>
+        <div class="inv-stats" id="inv-stats"></div>
+        <div id="inv-split"></div>
         <p class="screen-hint">Rendeu = valor de hoje menos o que você aplicou.</p>
         <div id="inv-list"></div>
       </section>

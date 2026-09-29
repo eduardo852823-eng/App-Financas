@@ -28,6 +28,8 @@ const CATEGORIES = [
 ];
 function catInfo(id) { return allCategories().find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1]; }
 // Botão de olho do Início: esconde valores (e a lista de entradas/saídas) só nas telas do Início
+// Os valores só "sobem" do zero na 1ª abertura do app; depois disso aparecem já certos (sem animar a cada troca de tela)
+let introAnim = true;
 let hideValues = localStorage.getItem("hideValues") === "1";
 function valuesHidden() { return hideValues && (currentScreen === "inicio" || currentScreen === "entradas-saidas"); }
 function fmtBRL(v) {
@@ -94,7 +96,7 @@ function countTo(el, to, { fmt = fmtBRL, html = false, ms = 650 } = {}) {
   const from = el.dataset.v === undefined ? 0 : Number(el.dataset.v);
   el.dataset.v = String(to);
   cancelAnimationFrame(el._raf);
-  if (valuesHidden() || REDUCE_MOTION || !isFinite(from) || from === to) { el[prop] = fmt(to); return; }
+  if (!introAnim || valuesHidden() || REDUCE_MOTION || !isFinite(from) || from === to) { el[prop] = fmt(to); return; }
   const t0 = performance.now();
   const step = (now) => {
     const t = Math.min(1, (now - t0) / ms);
@@ -370,6 +372,11 @@ let delSimId = null;
 let planMonth = null;   // "AAAA-MM" mostrado na aba Planejamento
 let planMode = "futuros"; // "futuros" | "metas"
 let editingPlanId = null;
+let esView = "dia";          // Entradas/Saídas: "dia" | "categoria"
+const ES_PAGE = 60;
+let esVisibleCount = ES_PAGE;
+const esOpenCats = new Set(); // categorias abertas na visão por categoria
+const metaOpen = new Set();   // categorias com a lista de subtítulos aberta (Metas)
 let payPlanId = null;
 let editingGoalCategory = null;
 let editingGoalId = null; // meta existente sendo editada (null = nova)       // transação aguardando a resposta "excluir as parecidas?"
@@ -565,6 +572,7 @@ function showLogin() {
 }
 function showApp() {
   syncSig = null; setTimeout(syncCheck, 1200);
+  if (introAnim) setTimeout(() => { introAnim = false; }, 2600);
   document.getElementById("screen-login").classList.remove("active");
   document.getElementById("main-app").classList.add("active");
   const last = localStorage.getItem("lastScreen");
@@ -669,6 +677,39 @@ function periodRange(id) {
   }
   return null;
 }
+const FILTERS_KEY = "fluxo_filtros_v1";
+// Salva filtros/ordenação/abas no aparelho para voltarem iguais ao recarregar a página
+function saveFilters() {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({
+      dashPeriodo: dashFilterPeriodo, dashBanco: dashFilterBanco,
+      txPeriodo: txFilterPeriodo, txBanco: txFilterBanco, txTipo: txFilterTipo, txCategoria: txFilterCategoria, txSearch,
+      sort: sortMode, esTipo, esView, catSegment, catMode, planMode
+    }));
+  } catch (e) { /* armazenamento indisponível: segue sem salvar */ }
+}
+function loadSavedFilters() {
+  let sv = null;
+  try { sv = JSON.parse(localStorage.getItem(FILTERS_KEY) || "null"); } catch (e) { sv = null; }
+  if (!sv || typeof sv !== "object") return;
+  const str = (v) => (typeof v === "string" && v.length > 0 && v.length <= 120 ? v : null);
+  const oneOf = (v, list) => (list.includes(v) ? v : null);
+  const per = (v) => (v === "all" || v === "current" || /^\d{4}-\d{2}$/.test(v || "") ? v : null);
+  dashFilterPeriodo = per(sv.dashPeriodo) || dashFilterPeriodo;
+  dashFilterBanco = str(sv.dashBanco) || dashFilterBanco;
+  txFilterPeriodo = TX_PERIODS.some(x => x.id === sv.txPeriodo) ? sv.txPeriodo : txFilterPeriodo;
+  txFilterBanco = str(sv.txBanco) || txFilterBanco;
+  txFilterTipo = oneOf(sv.txTipo, ["all", "entrada", "saida"]) || txFilterTipo;
+  txFilterCategoria = str(sv.txCategoria) || txFilterCategoria;
+  txSearch = typeof sv.txSearch === "string" ? sv.txSearch.slice(0, 80) : "";
+  if (sv.sort && typeof sv.sort === "object") ["tx", "es", "catdet"].forEach(k => { if (SORT_CYCLE.includes(sv.sort[k])) sortMode[k] = sv.sort[k]; });
+  esTipo = oneOf(sv.esTipo, ["entrada", "saida"]) || esTipo;
+  esView = oneOf(sv.esView, ["dia", "categoria"]) || esView;
+  catSegment = oneOf(sv.catSegment, ["gastos", "ganhos"]) || catSegment;
+  catMode = oneOf(sv.catMode, ["cats", "comparar"]) || catMode;
+  planMode = oneOf(sv.planMode, ["futuros", "metas"]) || planMode;
+}
+loadSavedFilters();
 function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) {
   // "current" = mês atual, calculado na hora (vira o mês sozinho, sem precisar reabrir o app)
   const ym = periodo === "current" ? curYm() : periodo;
@@ -689,12 +730,14 @@ function filterTx(txs, { periodo, range, banco, tipo, categoria, search } = {}) 
 function populateDashboardFilters() {
   const months = getAvailableMonths();
   const periodoSel = document.getElementById("filter-periodo");
+  // período salvo que não existe mais (ex.: mês sem transações) volta para "Todo o período"
+  if (months.length && dashFilterPeriodo !== "all" && dashFilterPeriodo !== "current" && !months.includes(dashFilterPeriodo)) dashFilterPeriodo = "all";
   setSelect(periodoSel, `<option value="all">Todo o período</option><option value="current">Mês atual</option>` +
     months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join(""), dashFilterPeriodo);
 
   const bancoSel = document.getElementById("filter-banco");
   const institutions = bankAccountsOnly();
-  if (dashFilterBanco !== "all" && !institutions.some(i => i.id === dashFilterBanco)) dashFilterBanco = "all";
+  if (institutions.length && dashFilterBanco !== "all" && !institutions.some(i => i.id === dashFilterBanco)) dashFilterBanco = "all";
   setSelect(bancoSel, `<option value="all">Todos os bancos</option>` +
     institutions.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join(""), dashFilterBanco);
 }
@@ -707,6 +750,7 @@ function monthLabelWithTag(ym) { return monthOptionLabel(ym); }
 
 function renderDashboard() {
   populateDashboardFilters();
+  saveFilters();
   let txs = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco });
   // Cartão de crédito tem seção própria: entradas, saídas e categorias aqui contam só contas bancárias
   // (senão o pagamento da fatura entraria duas vezes).
@@ -793,38 +837,93 @@ function toggleHideValues() {
 }
 function openEntradasSaidas(tipo) {
   if (valuesHidden()) { showToast("Valores escondidos. Toque no olho para mostrar."); return; }
-  esTipo = tipo;
+  esTipo = tipo; esVisibleCount = ES_PAGE; esOpenCats.clear();
   navigateTo("entradas-saidas", { refresh: false });
 }
+function esPeriodLabel() {
+  if (dashFilterPeriodo === "all") return "todo o período";
+  return monthLabel(dashFilterPeriodo === "current" ? curYm() : dashFilterPeriodo);
+}
+function esByDayHtml(all, isIn) {
+  const txs = all.slice(0, esVisibleCount);
+  const sign = isIn ? "+ " : "- ";
+  let html = "";
+  if (sortMode.es === "recent") {
+    const dayTotals = {};
+    all.forEach(t => { const d = t.date.slice(0, 10); dayTotals[d] = (dayTotals[d] || 0) + Math.abs(t.value); });
+    const days = [];
+    txs.forEach(t => {
+      const d = t.date.slice(0, 10);
+      let g = days[days.length - 1];
+      if (!g || g.day !== d) { g = { day: d, items: [] }; days.push(g); }
+      g.items.push(t);
+    });
+    let curMonth = null;
+    days.forEach(g => {
+      const mo = g.day.slice(0, 7);
+      if (mo !== curMonth) { curMonth = mo; html += `<div class="tx-month-label">${monthLabel(mo)}</div>`; }
+      html += `<div class="tx-day-label es-day-head"><span>${esc(txDayLabel(g.day))}</span><span class="es-day-total ${isIn ? "pos" : "neg"}">${sign}${fmtBRL(dayTotals[g.day])}</span></div>` +
+        `<div class="tx-group">${g.items.map(t => txRowHtml(t)).join("")}</div>`;
+    });
+  } else {
+    html = `<div class="tx-group">${txs.map(t => txRowHtml(t)).join("")}</div>`;
+  }
+  html += `<div class="tx-count-label">Mostrando ${txs.length} de ${all.length}</div>`;
+  if (all.length > esVisibleCount) html += `<button type="button" class="btn btn-outline" id="btn-load-more-es">Carregar mais</button>`;
+  return html;
+}
+function esByCategoryHtml(txs, total, isIn) {
+  const byCat = {};
+  txs.forEach(t => {
+    const id = effectiveCategory(t);
+    const g = byCat[id] || (byCat[id] = { id, items: [], total: 0 });
+    g.items.push(t); g.total += Math.abs(t.value);
+  });
+  const groups = Object.values(byCat).sort((a, b) => sortMode.es === "low" ? a.total - b.total : b.total - a.total);
+  const sign = isIn ? "+ " : "- ";
+  return groups.map(g => {
+    const info = catInfo(g.id), open = esOpenCats.has(g.id);
+    const pct = total ? (g.total / total) * 100 : 0;
+    const shown = g.items.slice(0, 40);
+    const body = open
+      ? `<div class="es-cat-body"><div class="tx-group">${shown.map(t => txRowHtml(t)).join("")}</div>${g.items.length > shown.length ? `<div class="tx-count-label">Mostrando ${shown.length} de ${g.items.length} — veja todas em Transações</div>` : ""}</div>`
+      : "";
+    return `<div class="es-cat${open ? " open" : ""}" style="--c:${esc(info.color || "#64748B")}">
+      <div class="es-cat-head" role="button" tabindex="0" aria-expanded="${open}" data-es-cat-toggle="${esc(g.id)}">
+        <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+        <div class="es-cat-main">
+          <div class="es-cat-name">${esc(info.name)}<span class="es-cat-count">${g.items.length}</span></div>
+          <div class="es-cat-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%"></i></div>
+        </div>
+        <div class="es-cat-right">
+          <div class="es-cat-total ${isIn ? "pos" : "neg"}">${sign}${fmtBRL(g.total)}</div>
+          <div class="es-cat-pct">${pct.toFixed(1).replace(".", ",")}%</div>
+        </div>
+        <svg class="es-cat-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </div>${body}</div>`;
+  }).join("");
+}
 function renderEntradasSaidas() {
-  const tipo = esTipo;
-  document.getElementById("topbar-title").textContent = tipo === "entrada" ? "Entradas" : "Saídas";
-  const txs = sortTxs(filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
-    .filter(t => !isCreditTx(t) && t.type === tipo), sortMode.es);
+  saveFilters();
+  const tipo = esTipo, isIn = tipo === "entrada";
+  document.getElementById("topbar-title").textContent = isIn ? "Entradas" : "Saídas";
+  document.querySelectorAll("#es-view .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.esview === esView));
+  renderSortSlot("es-sort-slot", "es");
+  const base = filterTx(state.transactions, { periodo: dashFilterPeriodo, banco: dashFilterBanco })
+    .filter(t => !isCreditTx(t) && t.type === tipo);
+  const total = base.reduce((s, t) => s + Math.abs(t.value), 0);
+  const sum = document.getElementById("es-summary");
+  sum.className = "es-summary " + (isIn ? "in" : "out");
+  sum.innerHTML = `<div class="es-sum-label">${isIn ? "Total de entradas" : "Total de saídas"}</div>` +
+    `<div class="es-sum-value">${isIn ? "+ " : "- "}${fmtBRL(total)}</div>` +
+    `<div class="es-sum-sub">${base.length} ${base.length === 1 ? "movimentação" : "movimentações"} · ${esc(esPeriodLabel())}</div>`;
   const container = document.getElementById("es-list-container");
-  if (!txs.length) {
-    container.innerHTML = `<div class="empty-state">Nenhuma ${tipo === "entrada" ? "entrada" : "saída"} no período.</div>`;
+  if (!base.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma ${isIn ? "entrada" : "saída"} no período.</div>`;
     return;
   }
-  const groups = {};
-  txs.forEach(t => {
-    const info = instInfo(t.bank_id, t.account_name);
-    const key = info.name;
-    if (!groups[key]) groups[key] = { info, items: [], total: 0 };
-    groups[key].items.push(t);
-    groups[key].total += Math.abs(t.value);
-  });
-  const names = Object.keys(groups).sort((a,b) => sortMode.es === "low" ? groups[a].total - groups[b].total : groups[b].total - groups[a].total);
-  container.innerHTML = sortBtnHtml("es") + names.map(name => {
-    const g = groups[name];
-    return `<div class="es-bank-group">
-      <div class="es-bank-head">
-        <div class="es-bank-name">${bankLogo("tx-icon", g.info.logoName || name, g.info.color, name)}${esc(name)}</div>
-        <div class="es-bank-total ${tipo === "entrada" ? "pos" : "neg"}">${tipo === "entrada" ? "+ " : "- "}${fmtBRL(g.total)}</div>
-      </div>
-      ${g.items.map(t => txRowHtml(t)).join("")}
-    </div>`;
-  }).join("");
+  const txs = sortTxs(base, sortMode.es);
+  container.innerHTML = esView === "categoria" ? esByCategoryHtml(txs, total, isIn) : esByDayHtml(txs, isIn);
 }
 
 /* ============================================================
@@ -1096,6 +1195,7 @@ async function loadPlanData() {
 let planLoadedAt = 0;
 function renderPlanejamento(force = false) {
   if (!planMonth) planMonth = curYm();
+  saveFilters();
   document.querySelectorAll("#plan-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.pmode === planMode));
   document.getElementById("plan-futuros").classList.toggle("hidden", planMode !== "futuros");
   document.getElementById("plan-metas").classList.toggle("hidden", planMode !== "metas");
@@ -1405,18 +1505,20 @@ async function confirmMarkPaid(btn) {
       if (idx !== -1) planItemsCache[idx] = { ...planItemsCache[idx], ...updated, paid: true };
       payPlanId = null;
       closeAllModals();
-      renderPlanFuturos();
+      repaintPlan();
       showToast("Marcado como pago (só no planejamento, não mexe no saldo real).");
     } catch (e) { showToast("Não foi possível marcar como pago: " + e.message, { error: true }); }
   });
 }
+// redesenha a aba Planejamento no modo em que ela está (lista de gastos futuros ou metas)
+function repaintPlan() { if (planMode === "metas") renderMetas(); else renderPlanFuturos(); }
 async function unpayPlanItem(id) {
   if (!confirm("Desfazer? O item volta a aparecer como não pago.")) return;
   try {
     await api(`/planned/${id}/unpay`, { method: "POST" });
     const idx = planItemsCache.findIndex(p => p.id === Number(id));
     if (idx !== -1) planItemsCache[idx] = { ...planItemsCache[idx], paid: false, tx_id: null };
-    renderPlanFuturos();
+    repaintPlan();
   }
   catch (e) { showToast("Não foi possível desfazer: " + e.message, { error: true }); }
 }
@@ -1428,18 +1530,31 @@ function goalFor(category, month) {
     || null;
 }
 function metaSubtitlesHtml(catId, catItems) {
-  const subs = subtitlesCache.filter(s => s.category === catId);
+  const subs = subtitlesCache.filter(sb => sb.category === catId);
   const sum = (arr) => arr.reduce((t, p) => t + p.value, 0);
-  const semSub = sum(catItems.filter(p => !p.subtitle || !subs.some(s => s.name === p.subtitle)));
-  const rows = subs.map(s => `<div class="meta-sub-row"><span class="meta-sub-row-name">${esc(s.name)}</span><span class="meta-sub-row-val">${fmtBRL(sum(catItems.filter(p => p.subtitle === s.name)))}</span></div>`);
-  if (semSub > 0) rows.push(`<div class="meta-sub-row"><span class="meta-sub-row-name">Sem subtítulo</span><span class="meta-sub-row-val">${fmtBRL(semSub)}</span></div>`);
+  const known = new Set(subs.map(sb => sb.name));
+  const groups = subs.map(sb => ({ name: sb.name, items: catItems.filter(p => p.subtitle === sb.name) }));
+  const loose = catItems.filter(p => !p.subtitle || !known.has(p.subtitle));
+  if (loose.length) groups.push({ name: "Sem subtítulo", items: loose });
+  const rows = groups.filter(g => g.items.length).map(g => {
+    const planned = sum(g.items), paid = sum(g.items.filter(p => p.paid));
+    const all = g.items.every(p => p.paid), partial = paid > 0 && !all;
+    const items = g.items.map(p => `<div class="meta-item${p.paid ? " paid" : ""}"><span class="meta-item-check">${p.paid ? ICONS.check(10) : ""}</span><span class="meta-item-name">${esc(p.name)}</span><span class="meta-item-val">${fmtBRL(p.value)}</span></div>`).join("");
+    return `<div class="meta-sub-group${all ? " done" : ""}">
+      <div class="meta-sub-row">
+        <span class="meta-sub-check${all ? " on" : partial ? " half" : ""}">${all ? ICONS.check(11) : ""}</span>
+        <span class="meta-sub-row-name">${esc(g.name)}</span>
+        <span class="meta-sub-row-val">${partial ? `<small>${fmtBRL(paid)} de</small> ` : ""}${fmtBRL(planned)}</span>
+      </div>${items}</div>`;
+  });
   if (!rows.length) return "";
+  const open = metaOpen.has(catId);
   return `
-    <button type="button" class="meta-sub-toggle" data-sub-toggle="${esc(catId)}">
+    <button type="button" class="meta-sub-toggle${open ? " open" : ""}" data-sub-toggle="${esc(catId)}">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       Ver por subtítulo
     </button>
-    <div class="meta-sub-list" id="meta-sub-list-${esc(catId)}">${rows.join("")}</div>`;
+    <div class="meta-sub-list${open ? " open" : ""}" id="meta-sub-list-${esc(catId)}">${rows.join("")}</div>`;
 }
 function renderMetas() {
   const ym = curYm(); // só o mês atual
@@ -1450,20 +1565,23 @@ function renderMetas() {
     const goal = goalFor(c.id, ym);
     const catItems = planItemsCache.filter(p => p.category === c.id && p.month === ym && p.type === "saida");
     const gasto = catItems.reduce((t, p) => t + p.value, 0);
+    const pago = catItems.filter(p => p.paid).reduce((t, p) => t + p.value, 0);
     const subs = metaSubtitlesHtml(c.id, catItems);
+    const legend = gasto > 0 ? `<div class="meta-legend"><span><i class="dot paid"></i>Pago ${fmtBRL(pago)}</span><span><i class="dot plan"></i>Planejado ${fmtBRL(gasto)}</span></div>` : "";
     if (!goal) {
       return `<div class="meta-row" ${styleAttr} data-cat="${esc(c.id)}">
         <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
         <div class="meta-row-main">
           <div class="cat-name">${esc(c.name)}</div>
-          <div class="cat-pct">${fmtBRL(gasto)} gastos em ${esc(monthLabel(ym))}</div>
+          <div class="cat-pct">${gasto > 0 ? `${fmtBRL(pago)} pago de ${fmtBRL(gasto)} planejado` : `Nada planejado em ${esc(monthLabel(ym))}`}</div>
           ${subs}
         </div>
         <button type="button" class="btn-link-small" data-meta-def="${esc(c.id)}">Definir meta</button>
       </div>`;
     }
     const diff = goal.value - gasto;
-    const pct = Math.min(100, (gasto / goal.value) * 100);
+    const pctPlan = goal.value > 0 ? Math.min(100, (gasto / goal.value) * 100) : 0;
+    const pctPaid = goal.value > 0 ? Math.min(100, (pago / goal.value) * 100) : 0;
     const over = gasto > goal.value;
     return `<div class="meta-row meta-row-set" ${styleAttr} data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
       <div class="meta-row-top">
@@ -1473,8 +1591,9 @@ function renderMetas() {
         </div>
         <div class="meta-amount">${fmtBRL(gasto)}</div>
       </div>
-      <div class="cat-bar meta-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%;background:${over ? "var(--out)" : c.color}"></i></div>
-      <div class="meta-status ${over ? "over" : ""}">${over ? "Passou " + fmtBRL(Math.abs(diff)) : "Resta " + fmtBRL(diff)}</div>
+      <div class="cat-bar meta-bar" role="img" aria-label="Pago ${fmtBRL(pago)} de ${fmtBRL(gasto)} planejado"><i class="meta-bar-plan${over ? " over" : ""}" style="width:${pctPlan.toFixed(1)}%"></i><i class="meta-bar-paid" style="width:${pctPaid.toFixed(1)}%"></i></div>
+      ${legend}
+      <div class="meta-status ${over ? "over" : ""}">${over ? "Passou " + fmtBRL(Math.abs(diff)) : "Resta " + fmtBRL(diff)} da meta</div>
       ${subs}
     </div>`;
   }).join("");
@@ -1606,34 +1725,65 @@ async function editInvDate(invId, current) {
   try { await api(`/investments/${encodeURIComponent(invId)}/date`, { method: "PUT", body: { date: iso } }); await refreshInvestments(); renderInvestimentos(); }
   catch (e) { showToast(e.message || "Não foi possível salvar", { error: true }); }
 }
+const INV_COLORS = ["#10B981", "#3B82F6", "#8B5CF6", "#F59E0B", "#EC4899", "#06B6D4", "#F97316", "#84CC16"];
 function renderInvestimentos() {
   const invs = (state.investments || []).filter(v => v.balance > 0 || v.balance < 0);
   const list = document.getElementById("inv-list");
+  const split = document.getElementById("inv-split");
+  const stats = document.getElementById("inv-stats");
   const total = invs.reduce((s, v) => s + (v.balance || 0), 0);
   document.getElementById("inv-total").textContent = fmtBRL(total);
   if (!invs.length) {
     document.getElementById("inv-change").textContent = "Nenhum investimento encontrado";
+    split.innerHTML = ""; stats.innerHTML = "";
     list.innerHTML = `<div class="empty-state">Nenhum banco conectado tem investimentos. Se você investe e não aparece, toque em Sincronizar em "Minhas instituições".</div>`;
     return;
   }
   const yieldOf = (v) => (v.amount_original != null ? v.balance - v.amount_original : (v.profit != null ? v.profit : null));
   const known = invs.filter(v => yieldOf(v) !== null);
   const totalYield = known.reduce((s, v) => s + yieldOf(v), 0);
+  const knownNow = known.reduce((s, v) => s + v.balance, 0);
+  const knownApplied = knownNow - totalYield;
+  const pctTxt = (y, base) => (base > 0 ? ` (${y >= 0 ? "+" : "-"}${Math.abs((y / base) * 100).toFixed(2).replace(".", ",")}%)` : "");
   const fmtYield = (y) => `<span class="inv-delta ${y >= 0 ? "pos" : "neg"}">${y >= 0 ? "+" : "-"}${fmtBRL(Math.abs(y))}</span>`;
-  document.getElementById("inv-change").innerHTML = known.length ? `Rendeu ${fmtYield(totalYield)} até hoje` : "";
+  document.getElementById("inv-change").innerHTML = known.length ? `Rendeu ${fmtYield(totalYield)}${pctTxt(totalYield, knownApplied)} até hoje` : "";
+
   const byItem = {};
   invs.forEach(v => (byItem[v.item_id] = byItem[v.item_id] || []).push(v));
-  list.innerHTML = Object.entries(byItem).map(([itemId, arr]) => {
-    const sub = arr.reduce((s, v) => s + v.balance, 0);
-    const rows = arr.map(v => {
+  const banks = Object.entries(byItem).map(([itemId, arr]) => ({ itemId, arr, sub: arr.reduce((s, v) => s + v.balance, 0) })).sort((a, b) => b.sub - a.sub);
+  const pos = banks.reduce((s, g) => s + Math.max(0, g.sub), 0);
+  banks.forEach((g, i) => { g.color = INV_COLORS[i % INV_COLORS.length]; g.pct = pos > 0 ? (Math.max(0, g.sub) / pos) * 100 : 0; });
+
+  stats.innerHTML = known.length ? `
+    <div class="inv-stat"><span>Aplicado</span><strong>${fmtBRL(knownApplied)}</strong></div>
+    <div class="inv-stat"><span>Valor atual</span><strong>${fmtBRL(knownNow)}</strong></div>
+    <div class="inv-stat ${totalYield >= 0 ? "up" : "down"}"><span>Rendeu</span><strong>${totalYield >= 0 ? "+" : "-"}${fmtBRL(Math.abs(totalYield))}</strong></div>` : "";
+
+  split.innerHTML = pos > 0 ? `<div class="card inv-split-card">
+      <div class="inv-split-title">Onde está seu dinheiro</div>
+      <div class="inv-split-bar">${banks.filter(g => g.pct > 0).map(g => `<i style="width:${g.pct.toFixed(2)}%;background:${g.color}"></i>`).join("")}</div>
+      <div class="inv-split-legend">${banks.filter(g => g.pct > 0).map(g => `<span><i class="dot" style="background:${g.color}"></i>${esc(itemTitle(g.itemId))} <b>${g.pct.toFixed(0)}%</b></span>`).join("")}</div>
+    </div>` : "";
+
+  list.innerHTML = banks.map(g => {
+    const gKnown = g.arr.filter(v => yieldOf(v) !== null);
+    const gYield = gKnown.reduce((s, v) => s + yieldOf(v), 0);
+    const gApplied = gKnown.reduce((s, v) => s + v.balance, 0) - gYield;
+    const rows = g.arr.slice().sort((a, b) => b.balance - a.balance).map(v => {
       const y = yieldOf(v);
-      const aplic = v.amount_original != null ? `Aplicado ${fmtBRL(v.amount_original)}` : "";
+      const applied = y !== null ? v.balance - y : null;
+      const share = g.sub > 0 ? Math.max(0, Math.min(100, (v.balance / g.sub) * 100)) : 0;
       return `<div class="inv-row">
         <div class="inv-row-top"><div class="inv-name">${esc(v.name)}</div><div class="inv-bal">${fmtBRL(v.balance)}</div></div>
-        <div class="inv-muted">${aplic}${aplic && y !== null ? " · " : ""}${y !== null ? "Rendeu " + fmtYield(y) : ""}</div>
+        <div class="inv-row-bar"><i style="width:${share.toFixed(1)}%;background:${g.color}"></i></div>
+        ${y !== null ? `<div class="inv-row-meta"><span>Aplicado ${fmtBRL(applied)}</span><span>Rendeu ${fmtYield(y)}${pctTxt(y, applied)}</span></div>` : ""}
       </div>`;
     }).join("");
-    return `<div class="card inv-bank"><div class="inv-bank-head"><div class="inv-bank-title">${bankLogo("bank-avatar sm", itemTitle(itemId), "#059669")}<h3>${esc(itemTitle(itemId))}</h3></div><strong>${fmtBRL(sub)}</strong></div>${rows}</div>`;
+    return `<div class="card inv-bank" style="--inv-c:${g.color}">
+      <div class="inv-bank-head">
+        <div class="inv-bank-title">${bankLogo("bank-avatar sm", itemTitle(g.itemId), "#059669")}<div><h3>${esc(itemTitle(g.itemId))}</h3><div class="inv-bank-share">${g.pct.toFixed(0)}% do total${gKnown.length ? ` · rendeu ${fmtYield(gYield)}${pctTxt(gYield, gApplied)}` : ""}</div></div></div>
+        <strong class="inv-bank-total">${fmtBRL(g.sub)}</strong>
+      </div>${rows}</div>`;
   }).join("");
 }
 
@@ -1667,6 +1817,12 @@ function populateTxFilters() {
 }
 
 function renderTransacoes() {
+  const cbAll = connectedBanks();
+  if (txFilterBanco !== "all" && cbAll.length && !cbAll.some(i => i.id === txFilterBanco)) txFilterBanco = "all";
+  if (txFilterCategoria !== "all" && !allCategories().some(c => c.id === txFilterCategoria)) txFilterCategoria = "all";
+  saveFilters();
+  const searchEl = document.getElementById("search-transacoes");
+  if (searchEl && document.activeElement !== searchEl && searchEl.value !== txSearch) searchEl.value = txSearch;
   // (as opções dos filtros são montadas quando o painel de filtros abre, não a cada digitação)
   // o botão de filtros fica destacado quando há filtro ligado (antes não dava para saber por que a lista estava menor)
   const filtrando = txFilterPeriodo !== "all" || txFilterBanco !== "all" || txFilterTipo !== "all" || txFilterCategoria !== "all";
@@ -2008,6 +2164,8 @@ function catEarliestYm() { const ms = getAvailableMonths(); return ms.length ? m
 
 function renderCategorias() {
   if (!catMonth) catMonth = curYm();
+  saveFilters();
+  document.querySelectorAll("#cat-segmented .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.seg === catSegment));
   document.getElementById("cat-view").classList.toggle("hidden", catMode !== "cats");
   document.getElementById("cat-comparar").classList.toggle("hidden", catMode !== "comparar");
   document.querySelectorAll("#cat-mode .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === catMode));
@@ -2251,6 +2409,8 @@ async function logoutUser() {
   txFilterTipo = "all"; txFilterCategoria = "all"; txVisibleCount = TX_PAGE_SIZE; catDetalhe = null; currentScreen = "inicio";
   sortMode = { tx: "recent", es: "recent", catdet: "recent" }; planLoadedAt = 0; lastDataFetch = 0;
   localStorage.removeItem("lastScreen");
+  localStorage.removeItem(FILTERS_KEY);
+  esTipo = "entrada"; esView = "dia"; catSegment = "gastos"; catMode = "cats"; planMode = "futuros"; esOpenCats.clear(); metaOpen.clear();
   syncSig = null;
   closeAllModals();
   showLogin();
@@ -2666,7 +2826,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const openCat = (e) => { const r = e.target.closest("[data-cat]"); if (r) openCategoriaDetalhe(r.dataset.cat); };
     document.getElementById("categorias-list").addEventListener("click", openCat);
     document.getElementById("cat-legend").addEventListener("click", openCat);
+    document.getElementById("es-view").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-esview]"); if (!b) return;
+      esView = b.dataset.esview; esVisibleCount = ES_PAGE;
+      renderEntradasSaidas();
+    });
+    document.getElementById("es-list-container").addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const tg = e.target.closest("[data-es-cat-toggle]"); if (!tg) return;
+      e.preventDefault(); tg.click();
+    });
     document.getElementById("es-list-container").addEventListener("click", (e) => {
+      if (e.target.closest("#btn-load-more-es")) { esVisibleCount += ES_PAGE; renderEntradasSaidas(); return; }
+      const tg = e.target.closest("[data-es-cat-toggle]");
+      if (tg) {
+        const id = tg.dataset.esCatToggle;
+        if (esOpenCats.has(id)) esOpenCats.delete(id); else esOpenCats.add(id);
+        renderEntradasSaidas(); return;
+      }
       const row = e.target.closest("[data-tx-id]");
       if (row) openTxDetalhe(row.dataset.txId);
     });
@@ -2874,11 +3051,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("metas-list").addEventListener("click", (e) => {
       const subToggle = e.target.closest("[data-sub-toggle]");
       if (subToggle) {
-        subToggle.classList.toggle("open");
-        const list = document.getElementById(`meta-sub-list-${subToggle.dataset.subToggle}`);
-        if (list) list.classList.toggle("open");
+        const cid = subToggle.dataset.subToggle;
+        if (metaOpen.has(cid)) metaOpen.delete(cid); else metaOpen.add(cid);
+        subToggle.classList.toggle("open", metaOpen.has(cid));
+        const list = document.getElementById(`meta-sub-list-${cid}`);
+        if (list) list.classList.toggle("open", metaOpen.has(cid));
         return;
       }
+      if (e.target.closest(".meta-sub-list")) return; // tocar nos itens não abre a edição da meta
       const def = e.target.closest("[data-meta-def]");
       if (def) return openMetaModal(def.dataset.metaDef);
       const row = e.target.closest("[data-meta-edit]");
@@ -2985,7 +3165,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function flush() {
     raf = 0;
     const batch = pending; pending = [];
-    if (reduced() || Date.now() < noCountUntil) return;
+    if (!introAnim || reduced() || Date.now() < noCountUntil) return;
     const nodes = [];
     batch.forEach(n => { if (n.isConnected) collect(n, nodes); });
     const vis = nodes.filter(inView).slice(0, MAX_NODES);
