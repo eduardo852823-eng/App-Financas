@@ -238,7 +238,7 @@
       <!-- ---------- CRÉDITOS ---------- -->
       <section class="screen screen-creditos" data-screen="creditos">
         <div class="card credits-card">
-          <img src="logo.png" alt="Fluxo" class="credits-logo" width="120" height="120">
+          <img src="icon-192.png" alt="Fluxo" class="credits-logo" width="52" height="52">
           <h2>Fluxo</h2>
           <p class="screen-hint" style="margin:0">Seu dinheiro, em movimento.</p>
           <div class="credit-line"><span>Criado por</span><strong>Eduardo</strong></div>
@@ -480,7 +480,7 @@
       </div>
       <div class="modal-body">
         <p class="del-card-name" id="pay-item-name"></p>
-        <p class="del-card-text">Isso cria uma transação de verdade, descontando do seu saldo. A categoria é escolhida automaticamente pelo nome — você pode trocá-la depois em Transações.</p>
+        <p class="del-card-text">É só um aviso visual no planejamento deste mês. Não cria transação e não mexe no seu saldo real. Você pode desfazer quando quiser.</p>
         <div class="del-sim-actions">
           <button class="btn btn-primary" type="button" id="btn-confirmar-pago">Marcar como pago</button>
           <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
@@ -597,7 +597,30 @@
         <label class="checkbox-row" style="margin-top:14px">
           <input type="checkbox" id="cfg-modo-escuro"> Modo escuro
         </label>
+        <div class="danger-zone">
+          <label>Zona de perigo <span class="cfg-hint">apaga transações, planejamento, metas, categorias criadas e investimentos. Sua conta e os bancos conectados continuam.</span></label>
+          <button type="button" class="btn-danger-outline" id="btn-apagar-tudo">Apagar todos os dados do app</button>
+        </div>
         <button class="btn btn-primary" id="btn-salvar-config" style="margin-top:16px">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== APAGAR TUDO (modal) ===================== -->
+  <div class="modal-overlay" id="modal-apagar-tudo">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Apagar todos os dados?</h3>
+        <button class="icon-btn" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-card-text">Isso apaga transações, planejamento, metas, categorias criadas e investimentos, em todos os seus aparelhos. Sua conta e os bancos conectados continuam. <b>Não dá para desfazer.</b></p>
+        <label for="apagar-confirm">Digite <b>APAGAR</b> para confirmar</label>
+        <input type="text" id="apagar-confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="APAGAR">
+        <div class="del-sim-actions">
+          <button class="btn btn-danger" type="button" id="btn-confirmar-apagar" disabled>Apagar tudo</button>
+          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
+        </div>
       </div>
     </div>
   </div>

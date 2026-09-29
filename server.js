@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS pluggy_accounts (
     "ALTER TABLE transactions ADD COLUMN pluggy_category TEXT",
     "ALTER TABLE transactions ADD COLUMN category_source TEXT",
     "ALTER TABLE users ADD COLUMN last_seen_at TEXT",
+    "ALTER TABLE preferences ADD COLUMN ui TEXT",
   ]) {
     try { await db.execute(stmt); } catch (e) { /* já existe */ }
   }
@@ -793,6 +794,54 @@ app.put("/api/me/preferences", auth, h(async (req, res) => {
      ON CONFLICT(user_id) DO UPDATE SET theme = excluded.theme, currency = excluded.currency`,
     [req.userId, theme || "light", currency || "BRL"]
   );
+  res.json({ ok: true });
+}));
+
+// Aparência que acompanha a conta em todos os aparelhos (cor do app e abas de baixo), guardada como JSON.
+app.put("/api/me/ui", auth, h(async (req, res) => {
+  const raw = typeof req.body.ui === "string" ? req.body.ui : "";
+  if (raw.length > 4000) return res.status(400).json({ error: "Configuração grande demais." });
+  try { JSON.parse(raw); } catch (e) { return res.status(400).json({ error: "Configuração inválida." }); }
+  await run(
+    `INSERT INTO preferences (user_id, ui) VALUES (?,?)
+     ON CONFLICT(user_id) DO UPDATE SET ui = excluded.ui`,
+    [req.userId, raw]
+  );
+  res.json({ ok: true });
+}));
+
+// Assinatura leve dos dados da conta: os aparelhos perguntam a cada ~15 s e só baixam tudo quando ela muda.
+// (contagens, maiores ids e somas simples: barato mesmo com milhares de transações)
+app.get("/api/sync-state", auth, h(async (req, res) => {
+  const u = Number(req.userId);
+  if (!Number.isInteger(u)) return res.status(400).json({ error: "Usuário inválido" });
+  const row = await get(`SELECT
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) || ':' || COALESCE(SUM(id * (COALESCE(unicode(substr(category,1,1)),0) * 131 + COALESCE(unicode(substr(category,2,1)),0) * 7 + COALESCE(unicode(substr(category,3,1)),0) * 3 + COALESCE(unicode(substr(category,-1,1)),0) * 11 + length(category) * 17 + COALESCE(category_manual,0) * 7)),0) FROM transactions WHERE user_id = ${u}) AS tx,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) || ':' || COALESCE(SUM(paid),0) || ':' || COALESCE(SUM(CAST(ROUND(value * 100) AS INTEGER)),0) || ':' || COALESCE(SUM(id * (COALESCE(CAST(REPLACE(month,'-','') AS INTEGER),0) + COALESCE(day,0) * 7 + length(name) * 13 + length(COALESCE(category,'')) * 17 + length(COALESCE(subtitle,'')) * 19 + COALESCE(paid,0) * 23)),0) FROM planned_items WHERE user_id = ${u}) AS plan,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) || ':' || COALESCE(SUM(CAST(ROUND(value * 100) AS INTEGER)),0) FROM category_goals WHERE user_id = ${u}) AS goals,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) FROM category_subtitles WHERE user_id = ${u}) AS subs,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) || ':' || COALESCE(SUM(id * (length(name) * 13 + length(icon) * 7 + length(color) * 3)),0) FROM custom_categories WHERE user_id = ${u}) AS cats,
+    (SELECT COUNT(*) || ':' || COALESCE(SUM(deleted),0) || ':' || COALESCE(SUM(length(COALESCE(name,'')) * 13 + length(COALESCE(icon,'')) * 7 + length(COALESCE(color,'')) * 3),0) FROM category_overrides WHERE user_id = ${u}) AS ovr,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) || ':' || COALESCE(MAX(last_sync),'') || ':' || COALESCE(MAX(status),'') FROM pluggy_items WHERE user_id = ${u}) AS items,
+    (SELECT COUNT(*) || ':' || COALESCE(SUM(CAST(ROUND(COALESCE(balance,0) * 100) AS INTEGER)),0) || ':' || COALESCE(MAX(updated_at),'') FROM pluggy_accounts WHERE user_id = ${u}) AS accs,
+    (SELECT COUNT(*) FROM pluggy_hidden_accounts WHERE user_id = ${u}) AS hidden,
+    (SELECT COUNT(*) || ':' || COALESCE(SUM(CAST(ROUND(COALESCE(balance,0) * 100) AS INTEGER)),0) FROM inv_positions WHERE user_id = ${u}) AS inv,
+    (SELECT COUNT(*) || ':' || COALESCE(MAX(id),0) FROM blocked_names WHERE user_id = ${u}) AS blocked,
+    (SELECT COALESCE(theme,'') || ':' || COALESCE(currency,'') || ':' || COALESCE(ui,'') FROM preferences WHERE user_id = ${u}) AS prefs`);
+  const sig = require("crypto").createHash("sha1").update(JSON.stringify(row || {})).digest("hex").slice(0, 16);
+  res.json({ sig });
+}));
+
+// "Apagar tudo": limpa os dados financeiros (transações, planejamento, metas, categorias criadas, investimentos).
+// Mantém a conta, o login, as preferências e os bancos conectados. As transações que vieram do banco ficam
+// registradas como "excluídas" para a próxima sincronização não trazer o histórico antigo de volta.
+app.delete("/api/me/data", auth, h(async (req, res) => {
+  if ((req.body || {}).confirm !== "APAGAR") return res.status(400).json({ error: "Confirmação ausente." });
+  const u = req.userId;
+  await run("INSERT OR IGNORE INTO deleted_tx (user_id, external_id) SELECT user_id, external_id FROM transactions WHERE user_id = ? AND external_id IS NOT NULL", [u]);
+  const tables = ["transactions", "planned_items", "category_goals", "category_subtitles", "custom_categories",
+    "category_overrides", "category_rules", "inv_positions", "inv_daily_history", "inv_manual"];
+  await db.batch(tables.map(t => ({ sql: `DELETE FROM ${t} WHERE user_id = ?`, args: [u] })), "write");
   res.json({ ok: true });
 }));
 

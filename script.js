@@ -176,7 +176,7 @@ function hideScreenLoader(force) {
   document.getElementById("screen-loader")?.classList.remove("show");
 }
 // Barrinha rápida a cada troca de tela: dá tempo dos valores "subirem" e mostra que o app está trabalhando.
-function flashLoader(ms = 650) { showScreenLoader(); setTimeout(() => hideScreenLoader(), ms); }
+function flashLoader(ms = 520) { showScreenLoader(); setTimeout(() => hideScreenLoader(), ms); }
 const MONTH_NAMES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 /* ============================================================
@@ -189,13 +189,13 @@ function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 // Toda chamada ao servidor tem tempo limite. Antes, se o servidor demorasse ou caísse, a chamada nunca
 // terminava e as bolinhas giravam para sempre. O servidor gratuito "dorme" e pode levar ~1 min para acordar.
 const API_TIMEOUT_MS = 45000;
-async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS } = {}) {
+async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS, silent = false } = {}) {
   const headers = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const ctrl = new AbortController();
   const killer = setTimeout(() => ctrl.abort(), timeout);
-  const slowHint = timeout > API_TIMEOUT_MS ? null : setTimeout(() => showToast("O servidor está acordando. Pode levar até 1 minuto na primeira vez.", { ms: 8000 }), 8000);
+  const slowHint = (silent || timeout > API_TIMEOUT_MS) ? null : setTimeout(() => showToast("O servidor está acordando. Pode levar até 1 minuto na primeira vez.", { ms: 8000 }), 8000);
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -214,6 +214,7 @@ async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS } = {}
     throw new Error("Sessão expirada. Entre novamente.");
   }
   if (!res.ok) throw new Error((data && data.error) || "Erro de conexão com o servidor");
+  if (method !== "GET" && !silent && !path.startsWith("/auth/")) scheduleSyncBaseline(); // minha própria alteração não conta como "mudança de outro aparelho"
   return data;
 }
 
@@ -434,7 +435,7 @@ function getNavCfg() {
   } catch (e) { /* usa o padrão */ }
   return JSON.parse(JSON.stringify(NAV_DEFAULT));
 }
-function saveNavCfg(c) { localStorage.setItem("navCfg", JSON.stringify(c)); renderBottomNav(); }
+function saveNavCfg(c) { localStorage.setItem("navCfg", JSON.stringify(c)); renderBottomNav(); pushUiPrefs(); }
 function renderBottomNav() {
   const nav = document.getElementById("bottom-nav"); if (!nav) return;
   const c = getNavCfg();
@@ -526,7 +527,7 @@ function wireNavEditor() {
   document.getElementById("btn-nav-reset").addEventListener("click", () => { saveNavCfg(JSON.parse(JSON.stringify(NAV_DEFAULT))); renderNavEditor(); });
   document.getElementById("accent-picker").addEventListener("click", (e) => {
     const b = e.target.closest("[data-accent]"); if (!b) return;
-    localStorage.setItem("accent", b.dataset.accent); applyAccent(); renderAccentPicker();
+    localStorage.setItem("accent", b.dataset.accent); applyAccent(); renderAccentPicker(); pushUiPrefs();
     if (currentScreen === "categorias") renderCategorias();
   });
 }
@@ -563,6 +564,7 @@ function showLogin() {
   document.getElementById("main-app").classList.remove("active");
 }
 function showApp() {
+  syncSig = null; setTimeout(syncCheck, 1200);
   document.getElementById("screen-login").classList.remove("active");
   document.getElementById("main-app").classList.add("active");
   const last = localStorage.getItem("lastScreen");
@@ -1180,7 +1182,7 @@ function renderPlanFuturos() {
 function animateMonthChange(wrapId, delta) {
   const wrap = document.getElementById(wrapId);
   if (!wrap) return;
-  const dx = delta > 0 ? 34 : -34;
+  const dx = delta > 0 ? 14 : -14;
   let i = 0;
   wrap.querySelectorAll(":scope > *").forEach(el => {
     let target = el;
@@ -1190,7 +1192,7 @@ function animateMonthChange(wrapId, delta) {
     } else if (el.classList.contains("screen-hint") || el.classList.contains("hidden")) return;
     if (!target) return;
     target.style.setProperty("--dx", dx + "px");
-    target.style.setProperty("--d", Math.min(i * 55, 330) + "ms");
+    target.style.setProperty("--d", Math.min(i * 40, 240) + "ms");
     target.classList.remove("pm-anim"); void target.offsetWidth; target.classList.add("pm-anim");
     i++;
   });
@@ -1409,13 +1411,12 @@ async function confirmMarkPaid(btn) {
   });
 }
 async function unpayPlanItem(id) {
-  if (!confirm("Desfazer? A transação criada vai ser apagada.")) return;
+  if (!confirm("Desfazer? O item volta a aparecer como não pago.")) return;
   try {
     await api(`/planned/${id}/unpay`, { method: "POST" });
     const idx = planItemsCache.findIndex(p => p.id === Number(id));
     if (idx !== -1) planItemsCache[idx] = { ...planItemsCache[idx], paid: false, tx_id: null };
     renderPlanFuturos();
-    refreshTransactions().catch(() => {});
   }
   catch (e) { showToast("Não foi possível desfazer: " + e.message, { error: true }); }
 }
@@ -1679,19 +1680,24 @@ function renderTransacoes() {
     return;
   }
   const txs = allTxs.slice(0, txVisibleCount);
-  const groups = {};
-  txs.forEach(t => {
-    const key = t.date.slice(0,7);
-    (groups[key] = groups[key] || []).push(t);
-  });
-  const months = Object.keys(groups).sort().reverse();
-  // ordenado por data: agrupa por mês; ordenado por valor: lista corrida (os meses ficariam embaralhados)
-  let html = sortMode.tx === "recent"
-    ? months.map(m => {
-        const rows = groups[m].map(t => txRowHtml(t)).join("");
-        return `<div class="tx-month-label">${monthLabel(m)}</div>${rows}`;
-      }).join("")
-    : txs.map(t => txRowHtml(t)).join("");
+  // por data: título do mês, título do dia e um cartão contínuo com as transações do dia.
+  // por valor: um único cartão (os dias ficariam embaralhados)
+  let html = "";
+  if (sortMode.tx === "recent") {
+    let curMonth = null, curDay = null, buf = "";
+    const flush = () => { if (buf) html += `<div class="tx-day-label">${esc(txDayLabel(curDay))}</div><div class="tx-group">${buf}</div>`; buf = ""; };
+    txs.forEach(t => {
+      const day = t.date.slice(0, 10), mo = day.slice(0, 7);
+      if (day !== curDay) {
+        flush(); curDay = day;
+        if (mo !== curMonth) { curMonth = mo; html += `<div class="tx-month-label">${monthLabel(mo)}</div>`; }
+      }
+      buf += txRowHtml(t);
+    });
+    flush();
+  } else {
+    html = `<div class="tx-group">${txs.map(t => txRowHtml(t)).join("")}</div>`;
+  }
   html += `<div class="tx-count-label">Mostrando ${txs.length} de ${allTxs.length} transações</div>`;
   if (allTxs.length > txVisibleCount) {
     html += `<button class="btn btn-outline" id="btn-load-more-tx">Carregar mais</button>`;
@@ -1699,6 +1705,16 @@ function renderTransacoes() {
   container.innerHTML = html;
 }
 
+function txDayLabel(ymd) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const key = (x) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+  const now = new Date(), ontem = new Date(now); ontem.setDate(now.getDate() - 1);
+  if (ymd === key(now)) return "Hoje";
+  if (ymd === key(ontem)) return "Ontem";
+  const d = new Date(ymd + "T12:00:00");
+  const sem = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"][d.getDay()];
+  return `${sem}, ${d.getDate()} de ${MONTH_NAMES[d.getMonth()].toLowerCase()}` + (d.getFullYear() !== now.getFullYear() ? ` de ${d.getFullYear()}` : "");
+}
 function txRowHtml(t) {
   const info = instInfo(t.bank_id, t.account_name);
   const cat = catInfo(effectiveCategory(t));
@@ -1709,8 +1725,8 @@ function txRowHtml(t) {
       <div>
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
+          <span class="tx-cat-chip" style="--c:${esc(cat.color || "#64748B")}"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${esc(cat.name)}${isGuess(t) ? ' <span class="ai-badge">IA</span>' : ""}</span>
           <span class="tx-bank-name">${esc(info.name)}</span>
-          <span class="tx-cat-chip"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${esc(cat.name)}${isGuess(t) ? ' <span class="ai-badge">IA</span>' : ""}</span>
         </div>
       </div>
     </div>
@@ -2222,6 +2238,7 @@ async function afterLoginSuccess(token) {
   await refreshAll();
   applyTheme(state.preferences.theme || "light");
   localStorage.setItem(THEME_CACHE_KEY, state.preferences.theme || "light");
+      applyRemotePrefs();
   applyUserToUI(state.user);
   showApp();
 }
@@ -2234,6 +2251,7 @@ async function logoutUser() {
   txFilterTipo = "all"; txFilterCategoria = "all"; txVisibleCount = TX_PAGE_SIZE; catDetalhe = null; currentScreen = "inicio";
   sortMode = { tx: "recent", es: "recent", catdet: "recent" }; planLoadedAt = 0; lastDataFetch = 0;
   localStorage.removeItem("lastScreen");
+  syncSig = null;
   closeAllModals();
   showLogin();
 }
@@ -2851,7 +2869,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (e.target.closest("[data-plan-edit]")) return openPlanModal(id);
       if (e.target.closest("[data-plan-del]")) return deletePlanItem(id);
     });
-    document.getElementById("btn-confirmar-pago").addEventListener("click", (e) => withLoading(e.currentTarget, () => confirmMarkPaid(e.currentTarget)));
+    document.getElementById("btn-confirmar-pago").addEventListener("click", (e) => confirmMarkPaid(e.currentTarget)); // confirmMarkPaid já mostra o anel de carregamento (antes o anel era aplicado duas vezes e o clique não fazia nada)
 
     document.getElementById("metas-list").addEventListener("click", (e) => {
       const subToggle = e.target.closest("[data-sub-toggle]");
@@ -2895,6 +2913,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await refreshAll();
       applyTheme(state.preferences.theme || "light");
       localStorage.setItem(THEME_CACHE_KEY, state.preferences.theme || "light");
+      applyRemotePrefs();
       applyUserToUI(state.user);
       showApp();
     };
@@ -2940,7 +2959,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const HAS = /R\$[\s\u00a0]?\d{1,3}(?:\.\d{3})*,\d{2}/;
   const RE = /(R\$[\s\u00a0]?)(\d{1,3}(?:\.\d{3})*,\d{2})/g;
   const BRL = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const DUR = 950, MAX_NODES = 60, SKIP = ".modal-overlay, .toast, [data-no-count]";
+  const DUR = 1100, MAX_NODES = 60, SKIP = ".modal-overlay, .toast, [data-no-count]";
   let pending = [], raf = 0, running = [], ticking = false;
 
   const reduced = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2966,7 +2985,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function flush() {
     raf = 0;
     const batch = pending; pending = [];
-    if (reduced()) return;
+    if (reduced() || Date.now() < noCountUntil) return;
     const nodes = [];
     batch.forEach(n => { if (n.isConnected) collect(n, nodes); });
     const vis = nodes.filter(inView).slice(0, MAX_NODES);
@@ -2975,7 +2994,7 @@ document.addEventListener("DOMContentLoaded", () => {
       running = running.filter(r => r.node !== node);
       const final = node.nodeValue;
       node.nodeValue = frame(final, 0);           // já começa em zero, antes de pintar
-      running.push({ node, final, t0: now + Math.min(i * 35, 280) });
+      running.push({ node, final, t0: now + Math.min(i * 25, 200) });
     });
     if (running.length && !ticking) { ticking = true; requestAnimationFrame(tick); }
   }
@@ -2983,7 +3002,7 @@ document.addEventListener("DOMContentLoaded", () => {
     running = running.filter(r => {
       if (!r.node.isConnected) return false;
       const p = Math.min(1, Math.max(0, (now - r.t0) / DUR));
-      r.node.nodeValue = p >= 1 ? r.final : frame(r.final, 1 - Math.pow(1 - p, 4));
+      r.node.nodeValue = p >= 1 ? r.final : frame(r.final, 1 - Math.pow(1 - p, 3));
       return p < 1;
     });
     if (running.length) requestAnimationFrame(tick); else ticking = false;
@@ -2997,3 +3016,101 @@ document.addEventListener("DOMContentLoaded", () => {
     }).observe(content, { childList: true, subtree: true });
   });
 })();
+
+/* ============================================================
+   SINCRONIZAÇÃO ENTRE APARELHOS
+   A cada ~15 s (com o app aberto) pergunta ao servidor uma "assinatura" barata dos seus dados.
+   Se mudou em outro aparelho, baixa tudo e redesenha a tela sozinho (sem animar os valores de novo).
+   Também confere na hora ao voltar para o app, quando a internet volta e depois das suas alterações.
+   ============================================================ */
+let syncSig = null, syncBusy = false, syncBaseTimer = null, noCountUntil = 0, pushUiTimer = null;
+const SYNC_EVERY_MS = 15000;
+
+function userIsBusy() { return !!document.querySelector(".modal-overlay.active, .cselect-panel.open"); }
+async function fetchSyncSig() { const r = await api("/sync-state", { silent: true, timeout: 20000 }); return r.sig; }
+
+// depois de uma alteração feita AQUI, guarda a nova assinatura para ela não ser confundida com mudança de outro aparelho
+function scheduleSyncBaseline() {
+  if (!state.user) return;
+  clearTimeout(syncBaseTimer);
+  syncBaseTimer = setTimeout(async () => {
+    if (syncBusy || !state.user) return;
+    try { syncSig = await fetchSyncSig(); } catch (e) { /* sem internet: o próximo ciclo resolve */ }
+  }, 500);
+}
+
+async function syncCheck() {
+  if (!state.user || syncBusy || document.visibilityState !== "visible" || dataFetching || autoSyncing) return;
+  syncBusy = true;
+  try {
+    const sig = await fetchSyncSig();
+    if (syncSig === null) { syncSig = sig; return; }
+    if (sig === syncSig) return;
+    if (userIsBusy()) return; // não redesenha por baixo de uma janela aberta; tenta de novo no próximo ciclo
+    syncSig = sig;
+    noCountUntil = Date.now() + 1500;
+    await Promise.all([refreshMe(), refreshTransactions(), refreshAccounts(), refreshPluggyItems(), refreshCategories(), refreshInvestments(), loadPlanData()]);
+    lastDataFetch = Date.now(); planLoadedAt = Date.now();
+    if (!state.user) return;
+    applyRemotePrefs();
+    renderScreen(currentScreen);
+  } catch (e) { /* silencioso: é só uma checagem em segundo plano */ }
+  finally { syncBusy = false; }
+}
+
+// tema, cor do app e abas de baixo acompanham a conta
+function applyRemotePrefs() {
+  const p = state.preferences || {};
+  if (p.theme && p.theme !== (document.documentElement.getAttribute("data-theme") || "light")) {
+    applyTheme(p.theme); localStorage.setItem(THEME_CACHE_KEY, p.theme);
+  }
+  try {
+    const ui = p.ui ? JSON.parse(p.ui) : null;
+    if (!ui) return;
+    if (ui.accent && ACCENTS[ui.accent]) localStorage.setItem("accent", ui.accent);
+    if (ui.navCfg && Array.isArray(ui.navCfg.order)) localStorage.setItem("navCfg", JSON.stringify(ui.navCfg));
+    applyAccent(); renderBottomNav();
+  } catch (e) { /* configuração ilegível: mantém a atual */ }
+}
+function pushUiPrefs() {
+  if (!state.user) return;
+  clearTimeout(pushUiTimer);
+  pushUiTimer = setTimeout(async () => {
+    const ui = JSON.stringify({ accent: currentAccent(), navCfg: getNavCfg() });
+    try { await api("/me/ui", { method: "PUT", body: { ui } }); state.preferences.ui = ui; }
+    catch (e) { console.warn("não foi possível salvar a aparência na conta", e.message); }
+  }, 600);
+}
+
+setInterval(syncCheck, SYNC_EVERY_MS);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(syncCheck, 400); });
+window.addEventListener("online", () => syncCheck());
+window.addEventListener("focus", () => setTimeout(syncCheck, 300));
+
+/* ============================================================
+   APAGAR TUDO (Configurações → Zona de perigo)
+   ============================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+  const input = document.getElementById("apagar-confirm");
+  const btn = document.getElementById("btn-confirmar-apagar");
+  const open = document.getElementById("btn-apagar-tudo");
+  if (!input || !btn || !open) return;
+  open.addEventListener("click", () => { input.value = ""; btn.disabled = true; openModal("modal-apagar-tudo"); setTimeout(() => input.focus(), 250); });
+  input.addEventListener("input", () => { btn.disabled = input.value.trim().toUpperCase() !== "APAGAR"; });
+  btn.addEventListener("click", () => {
+    if (input.value.trim().toUpperCase() !== "APAGAR") return;
+    withLoading(btn, async () => {
+      try {
+        await api("/me/data", { method: "DELETE", body: { confirm: "APAGAR" } });
+        state.transactions = []; state.customCategories = []; state.categoryOverrides = {}; state.investments = []; state.investHistory = [];
+        planItemsCache = []; goalsCache = []; subtitlesCache = [];
+        txVisibleCount = TX_PAGE_SIZE; catDetalhe = null;
+        await Promise.all([refreshTransactions(), refreshCategories(), refreshInvestments(), loadPlanData()]);
+        lastDataFetch = Date.now(); planLoadedAt = Date.now();
+        closeAllModals();
+        navigateTo("inicio", { refresh: false });
+        showToast("Tudo apagado. Sua conta e os bancos conectados continuam.");
+      } catch (e) { showToast("Não foi possível apagar: " + e.message, { error: true }); }
+    });
+  });
+});
