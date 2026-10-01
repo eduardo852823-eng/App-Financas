@@ -1049,6 +1049,12 @@ app.put("/api/planned/:id", auth, h(async (req, res) => {
   );
   res.json(await get("SELECT * FROM planned_items WHERE id = ?", [item.id]));
 }));
+// Apaga TODOS os itens planejados (gastos/ganhos futuros, de todos os meses) do usuário. Metas e transações não são tocadas.
+app.delete("/api/planned", auth, h(async (req, res) => {
+  const row = await get("SELECT COUNT(*) AS n FROM planned_items WHERE user_id = ?", [req.userId]);
+  await run("DELETE FROM planned_items WHERE user_id = ?", [req.userId]);
+  res.json({ ok: true, deleted: Number((row && row.n) || 0) });
+}));
 app.delete("/api/planned/:id", auth, h(async (req, res) => {
   const item = await get("SELECT * FROM planned_items WHERE id = ? AND user_id = ?", [req.params.id, req.userId]);
   if (!item) return res.status(404).json({ error: "Não encontrado" });

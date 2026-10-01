@@ -524,6 +524,24 @@
     </div>
   </div>
 
+  <!-- ===================== APAGAR TODOS OS PLANEJAMENTOS (modal; aberto pelo botão escondido) ===================== -->
+  <div class="modal-overlay" id="modal-apagar-planos">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Apagar todos os planejamentos?</h3>
+        <button class="icon-btn" data-close-modal aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-card-text" id="apagar-planos-text"></p>
+        <div class="plan-error hidden" id="apagar-planos-error"></div>
+        <div class="del-sim-actions" style="margin-top:16px">
+          <button class="btn btn-danger" type="button" id="btn-confirmar-apagar-planos">Apagar tudo</button>
+          <button class="btn-link-small" type="button" data-close-modal>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== EXCLUIR TRANSAÇÕES PARECIDAS (modal) ===================== -->
   <div class="modal-overlay" id="modal-excluir-parecidas">
     <div class="modal-card">

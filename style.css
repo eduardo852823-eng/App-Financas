@@ -1681,3 +1681,6 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent;}
 @supports (height:100dvh){
   .app, .screen-login, .main-app{min-height:100dvh;}
 }
+
+/* título do topo: sem seleção de texto nem menu de "segurar" (é onde fica o botão escondido do Planejamento) */
+#topbar-title{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}

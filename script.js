@@ -216,7 +216,7 @@ async function api(path, { method = "GET", body, timeout = API_TIMEOUT_MS, silen
     clearToken(); state.user = null; hideScreenLoader(true); showLogin();
     throw new Error("Sessão expirada. Entre novamente.");
   }
-  if (!res.ok) throw new Error((data && data.error) || "Erro de conexão com o servidor");
+  if (!res.ok) { const err = new Error((data && data.error) || "Erro de conexão com o servidor"); err.status = res.status; throw err; }
   if (method !== "GET" && !silent && !path.startsWith("/auth/")) scheduleSyncBaseline(); // minha própria alteração não conta como "mudança de outro aparelho"
   return data;
 }
@@ -1445,6 +1445,60 @@ async function deletePlanItem(id) {
   if (!confirm("Excluir este item do planejamento?")) return;
   try { await api(`/planned/${id}`, { method: "DELETE" }); renderPlanejamento(true); }
   catch (e) { showToast("Não foi possível excluir: " + e.message, { error: true }); }
+}
+/* ---------- botão escondido: apagar todos os planejamentos ----------
+   Como abrir: na tela Planejamento, segure o título "Planejamento" (no topo) por ~1,5 segundo. */
+function openApagarPlanos() {
+  if (!state.user) return;
+  if (!planLoadedAt) { showToast("Aguarde o planejamento terminar de carregar."); return; }
+  const n = planItemsCache.length;
+  if (!n) { showToast("Não há planejamentos para apagar."); return; }
+  const meses = new Set(planItemsCache.map(p => p.month)).size;
+  document.getElementById("apagar-planos-text").textContent =
+    `Isso apaga ${n} ${n === 1 ? "item" : "itens"} de gastos e ganhos futuros (${meses} ${meses === 1 ? "mês" : "meses"}). Não dá para desfazer. Suas metas por categoria e suas transações não são afetadas.`;
+  document.getElementById("apagar-planos-error").classList.add("hidden");
+  if (navigator.vibrate) navigator.vibrate(25);
+  openModal("modal-apagar-planos");
+}
+async function apagarTodosPlanejamentos() {
+  const errEl = document.getElementById("apagar-planos-error");
+  errEl.classList.add("hidden");
+  try {
+    try {
+      await api("/planned", { method: "DELETE" });
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      // servidor ainda na versão antiga (sem a rota em massa): apaga um por um
+      for (const p of [...planItemsCache]) {
+        try { await api(`/planned/${p.id}`, { method: "DELETE" }); }
+        catch (err) { if (err.status !== 404) throw err; }
+      }
+    }
+    closeAllModals();
+    planItemsCache = [];
+    renderPlanejamento(true);
+    showToast("Todos os planejamentos foram apagados.");
+  } catch (e) {
+    errEl.textContent = "Não foi possível apagar tudo: " + (e.message || "erro desconhecido");
+    errEl.classList.remove("hidden");
+    renderPlanejamento(true); // mostra o que realmente sobrou
+  }
+}
+function wireHiddenPlanReset() {
+  const el = document.getElementById("topbar-title");
+  if (!el || el.dataset.resetWired) return;
+  el.dataset.resetWired = "1";
+  let timer = null, sx = 0, sy = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  el.addEventListener("pointerdown", (e) => {
+    if (currentScreen !== "planejamento") return;
+    sx = e.clientX; sy = e.clientY;
+    cancel();
+    timer = setTimeout(() => { timer = null; openApagarPlanos(); }, 1500);
+  });
+  el.addEventListener("pointermove", (e) => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev => el.addEventListener(ev, cancel));
+  el.addEventListener("contextmenu", (e) => { if (currentScreen === "planejamento") e.preventDefault(); });
 }
 function askMarkPaid(id) {
   payPlanId = id;
@@ -3003,6 +3057,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("btn-salvar-meta").addEventListener("click", (e) => withLoading(e.currentTarget, saveMeta));
     document.getElementById("btn-remover-meta").addEventListener("click", (e) => withLoading(e.currentTarget, removeMeta));
+    document.getElementById("btn-confirmar-apagar-planos").addEventListener("click", (e) => withLoading(e.currentTarget, apagarTodosPlanejamentos));
+    wireHiddenPlanReset();
   }, "planejamento");
 
   wire(() => {
