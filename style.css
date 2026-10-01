@@ -1652,3 +1652,32 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent;}
 .tut-sec ul{margin:0; padding:0 16px 14px 44px; display:flex; flex-direction:column; gap:8px; font-size:13.5px; line-height:1.5; color:var(--text-secondary);}
 [data-theme="dark"] .tut-sec ul, [data-theme="dark"] .tut-text{color:#C3CFE2;}
 @media (prefers-reduced-motion:reduce){ .pl-hero-bar i, .tut-dot, .tut-sec summary::after{transition:none;} .tut-slide, .pl-cat{animation:none;} }
+
+/* ===================== CORREÇÕES DE REVISÃO ===================== */
+/* --gray-200 era usada em vários lugares (bordas, divisores) mas nunca foi definida: as bordas sumiam */
+:root{--gray-200:#D6DEEC;}
+[data-theme="dark"]{--gray-200:#2C3950;}
+
+/* primeiro banco da lista colava na borda da tela (o snap alinhava sem o respiro de 18px) */
+.screen-dashboard .banks-scroll{scroll-padding-inline:18px;}
+
+/* valores de Entradas/Saídas eram cortados com "..." (ex.: R$ 17.181,...) */
+.flow-tile{gap:8px; padding:13px 11px;}
+.flow-tile .flow-ico{width:30px; height:30px;}
+.flow-tile .mini-value{font-size:clamp(13px, 3.9vw, 16px); overflow:visible; text-overflow:clip;}
+
+/* Investimentos: "R$" ficava sozinho numa linha e o número na outra */
+.inv-stat{padding-inline:10px;}
+.inv-stat strong{white-space:nowrap; overflow-wrap:normal; font-size:clamp(11px, 3.2vw, 15px); letter-spacing:-.2px;}
+
+/* Metas: textos como "Nada planejado em Setembro..." eram cortados; agora quebram em linhas */
+.meta-row .cat-pct{white-space:normal; overflow:visible; text-overflow:clip;}
+
+/* filtro de bancos da tela Início cortava "Todos os bancos" por 1px */
+.screen-dashboard .filters-row select{padding:10px 26px 10px 12px;}
+.comp-selects select{text-overflow:ellipsis;}
+
+/* altura correta da tela em celulares com barra de endereço dinâmica */
+@supports (height:100dvh){
+  .app, .screen-login, .main-app{min-height:100dvh;}
+}

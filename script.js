@@ -33,9 +33,10 @@ let introAnim = true;
 let hideValues = localStorage.getItem("hideValues") === "1";
 function valuesHidden() { return hideValues && (currentScreen === "inicio" || currentScreen === "entradas-saidas"); }
 function fmtBRL(v) {
-  if (valuesHidden()) return "R$ ••••";
-  const sign = v < 0 ? "-" : "";
-  return sign + "R$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (valuesHidden()) return "R$\u00a0••••";
+  const n = Math.round((Number(v) || 0) * 100) / 100; // evita "-R$ 0,00" quando o valor arredonda para zero
+  const sign = n < 0 ? "-" : "";
+  return sign + "R$\u00a0" + Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // Escapa texto vindo de fora (descrição de Pix/compra, nome de conta) antes de colocar em innerHTML
 function esc(v) {
@@ -599,7 +600,7 @@ function navigateTo(screen, { refresh = true, swipeDir = null } = {}) {
     }
   }
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === (screen === "categoria-detalhe" ? "categorias" : screen)));
-  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
+  const titles = { inicio: "Início", bancos: "Minhas instituições", investimentos: "Investimentos", planejamento: "Planejamento", creditos: "Créditos", "categoria-detalhe": catDetalhe ? catInfo(catDetalhe).name : "Categoria", transacoes: "Transações", categorias: "Categorias", "entradas-saidas": esTipo === "entrada" ? "Entradas" : "Saídas" };
   const topTitle = document.getElementById("topbar-title");
   if (screen === "inicio") topTitle.innerHTML = BRAND_HTML; else topTitle.textContent = titles[screen] || "";
   const backBtn = document.getElementById("btn-back");
@@ -745,6 +746,8 @@ function monthLabel(ym) {
 }
 function monthOptionLabel(ym) { return ym === curYm() ? `${monthLabel(ym)} — Mês atual` : monthLabel(ym); }
 function monthLabelWithTag(ym) { return monthOptionLabel(ym); }
+// rótulo curto ("Set 2026") para selects estreitos, onde o nome completo era cortado
+function monthShortLabel(ym) { const [y, mo] = ym.split("-").map(Number); return `${MES_ABREV[mo - 1]} ${y}`; }
 
 function renderDashboard() {
   populateDashboardFilters();
@@ -795,8 +798,8 @@ function renderDashboard() {
 // "R$ 1.234,56" vira R$ pequeno + número grande + centavos pequenos (só tipografia, o valor é o mesmo)
 function heroMoneyHtml(v) {
   const txt = fmtBRL(v);
-  const m = txt.match(/^(-?)R\$ ([\d.]+)(,\d{2})$/);
-  if (!m) return `<span class="cur">R$</span>${esc(txt.replace(/^-?R\$ ?/, ""))}`;
+  const m = txt.match(/^(-?)R\$[\s\u00a0]([\d.]+)(,\d{2})$/);
+  if (!m) return `<span class="cur">R$</span>${esc(txt.replace(/^-?R\$[\s\u00a0]?/, ""))}`;
   return `<span class="cur">R$</span>${m[1] ? "-" : ""}${m[2]}<span class="cents">${m[3]}</span>`;
 }
 // Linha de "fluxo" do saldo dentro do período (soma acumulada das transações por dia). Só desenha; não altera dados.
@@ -1133,7 +1136,7 @@ function renderLegend(elId, byCat, total) {
     const pct = total ? ((val / total) * 100).toFixed(1).replace(".", ",") : "0,0";
     return `<div class="legend-row" data-cat="${esc(cat)}" title="${esc(info.name)}">
       <span class="legend-dot" style="background:${info.color}"></span>
-      <span class="legend-name">${info.icon} ${esc(info.name)}</span>
+      <span class="legend-name">${esc(info.icon)} ${esc(info.name)}</span>
       <span class="legend-pct">${pct}%</span>
     </div>`;
   }).join("");
@@ -1212,7 +1215,7 @@ function renderPlanFuturos() {
     const total = list.reduce((s, p) => s + (p.type === "entrada" ? p.value : -p.value), 0);
     const done = list.filter(p => p.paid).length;
     return `<div class="pl-cat" style="--c:${esc(info.color || "#64748B")};animation-delay:${(gi * 0.05).toFixed(3)}s">
-      <div class="pl-cat-head"><span class="pl-cat-ico">${info.icon}</span><span class="pl-cat-name">${esc(info.name)}</span>
+      <div class="pl-cat-head"><span class="pl-cat-ico">${esc(info.icon)}</span><span class="pl-cat-name">${esc(info.name)}</span>
         <span class="pl-cat-done">${done}/${list.length}</span><b class="pl-cat-total">${total < 0 ? "- " : ""}${fmtBRL(Math.abs(total))}</b></div>
       ${list.map(planItemRowHtml).join("")}
     </div>`;
@@ -1263,7 +1266,7 @@ function renderCategoriaCSelect(selectedId) {
   const opts = [{ id: "", name: "Sem categoria", icon: "🚫", color: "var(--gray-200)" }, ...allCategories()];
   panel.innerHTML = `<div class="cselect-scroll">${opts.map(c => `
     <button type="button" class="cselect-option ${c.id === selectedId ? "active" : ""}" data-value="${esc(c.id)}">
-      <span class="cselect-opt-icon" style="background:${c.color}">${c.icon || ""}</span>
+      <span class="cselect-opt-icon" style="background:${c.color}">${esc(c.icon || "")}</span>
       <span class="cselect-opt-name">${esc(c.name)}</span>
       ${c.id === selectedId ? ICONS.check(14) : ""}
     </button>`).join("")}</div>`;
@@ -1300,7 +1303,10 @@ function attachWheel(containerId, items, initialValue, onChange) {
   let initIdx = clampIdx(items.findIndex(it => String(it.value) === String(initialValue)));
   if (initIdx < 0) initIdx = 0;
   requestAnimationFrame(() => { el.scrollTop = initIdx * WHEEL_ITEM_H; setActive(initIdx); });
+  if (el._wheelAbort) el._wheelAbort.abort(); // remove os listeners da abertura anterior
+  const ac = new AbortController(); el._wheelAbort = ac;
   let t = null;
+  ac.signal.addEventListener("abort", () => clearTimeout(t));
   el.addEventListener("scroll", () => {
     clearTimeout(t);
     t = setTimeout(() => {
@@ -1309,12 +1315,12 @@ function attachWheel(containerId, items, initialValue, onChange) {
       setActive(idx);
       onChange(items[idx].value);
     }, 110);
-  });
+  }, { signal: ac.signal });
   el.addEventListener("click", (e) => {
     const item = e.target.closest(".wheel-item"); if (!item) return;
     const idx = nodes().indexOf(item);
     el.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: "smooth" });
-  });
+  }, { signal: ac.signal });
 }
 let planWheelDay = null, planWheelMonthNum = null, planWheelYearNum = null;
 let planVariosMeses = false, planQtdMeses = 2;
@@ -1411,7 +1417,19 @@ async function savePlanejado() {
     if (editingPlanId) {
       await api(`/planned/${editingPlanId}`, { method: "PUT", body: { name, value, type, month: baseMonth, category, subtitle, day } });
     } else {
-      for (const month of meses) await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle, day } });
+      let created = 0;
+      try {
+        for (const month of meses) { await api("/planned", { method: "POST", body: { name, value, type, month, category, subtitle, day } }); created++; }
+      } catch (err) {
+        if (!created) throw err;
+        // parte já foi salva: fecha o modal e atualiza a lista para não duplicar ao tentar de novo
+        editingPlanId = null;
+        closeAllModals();
+        planMonth = meses[created - 1];
+        renderPlanejamento(true);
+        showToast(`Só ${created} de ${meses.length} itens foram criados. Confira a lista e adicione os que faltam.`, { error: true });
+        return;
+      }
     }
     editingPlanId = null;
     closeAllModals();
@@ -1510,7 +1528,7 @@ function renderMetas() {
     const legend = gasto > 0 ? `<div class="meta-legend"><span><i class="dot paid"></i>Pago ${fmtBRL(pago)}</span><span><i class="dot plan"></i>Planejado ${fmtBRL(gasto)}</span></div>` : "";
     if (!goal) {
       return `<div class="meta-row" ${styleAttr} data-cat="${esc(c.id)}">
-        <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
+        <div class="cat-icon" style="background:${c.color}">${esc(c.icon)}</div>
         <div class="meta-row-main">
           <div class="cat-name">${esc(c.name)}</div>
           <div class="cat-pct">${gasto > 0 ? `${fmtBRL(pago)} pago de ${fmtBRL(gasto)} planejado` : `Nada planejado em ${esc(monthLabel(ym))}`}</div>
@@ -1526,7 +1544,7 @@ function renderMetas() {
     return `<div class="meta-row meta-row-set" ${styleAttr} data-cat="${esc(c.id)}" data-meta-edit="${esc(c.id)}">
       <div class="meta-row-top">
         <div class="meta-row-head">
-          <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
+          <div class="cat-icon" style="background:${c.color}">${esc(c.icon)}</div>
           <div class="meta-row-main"><div class="cat-name">${esc(c.name)}</div><div class="cat-pct">Meta: ${fmtBRL(goal.value)}${goal.month ? " (só " + esc(monthLabel(goal.month)) + ")" : ""}</div></div>
         </div>
         <div class="meta-amount">${fmtBRL(gasto)}</div>
@@ -1554,7 +1572,7 @@ function renderMesesGrid(category, year) {
 }
 function openMetaModal(catId) {
   editingGoalCategory = catId;
-  const ym = planMonth || curYm();
+  const ym = curYm();
   const year = ym.slice(0, 4);
   const goal = goalFor(catId, ym);
   const specificos = specificGoalsFor(catId, year);
@@ -1576,7 +1594,7 @@ async function saveMeta() {
   const errEl = document.getElementById("meta-error");
   errEl.classList.add("hidden");
   if (!value || value <= 0) { errEl.textContent = "Informe um valor válido."; errEl.classList.remove("hidden"); return; }
-  const ym = planMonth || curYm();
+  const ym = curYm();
   const year = ym.slice(0, 4);
   try {
     if (tipo === "fixo") {
@@ -1597,7 +1615,7 @@ async function saveMeta() {
   } catch (e) { errEl.textContent = e.message || "Não foi possível salvar a meta."; errEl.classList.remove("hidden"); }
 }
 async function removeMeta() {
-  const ym = planMonth || curYm();
+  const ym = curYm();
   const year = ym.slice(0, 4);
   const ids = new Set();
   if (editingGoalId) ids.add(editingGoalId);
@@ -1627,7 +1645,7 @@ function renderCategoriaDetalhe() {
   const total = txs.reduce((s, t) => s + Math.abs(t.value), 0);
   const el = document.getElementById("catdet-container");
   const head = `<div class="card catdet-head">
-    <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+    <div class="cat-icon" style="background:${info.color}">${esc(info.icon)}</div>
     <div><div class="cat-name">${esc(info.name)}</div>
     <div class="cat-pct">${txs.length} ${isGasto ? "gasto" : "ganho"}${txs.length === 1 ? "" : "s"} • ${esc(monthLabel(ym))}</div></div>
     <div class="cat-amount catdet-total ${isGasto ? "neg" : "pos"}">${fmtBRL(total)}</div>
@@ -1752,7 +1770,7 @@ function populateTxFilters() {
 
   const catSel = document.getElementById("tx-filter-categoria");
   catSel.innerHTML = `<option value="all">Todas categorias</option>` +
-    allCategories().map(c => `<option value="${esc(c.id)}">${c.icon} ${esc(c.name)}</option>`).join("");
+    allCategories().map(c => `<option value="${esc(c.id)}">${esc(c.icon)} ${esc(c.name)}</option>`).join("");
   catSel.value = txFilterCategoria;
 }
 
@@ -1807,7 +1825,7 @@ function txRowHtml(t) {
       <div>
         <div class="tx-desc">${esc(t.desc)}</div>
         <div class="tx-meta">
-          <span class="tx-cat-chip" style="--c:${esc(cat.color || "#64748B")}"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${cat.icon} ${esc(cat.name)}${isGuess(t) ? ' <span class="ai-badge">IA</span>' : ""}</span>
+          <span class="tx-cat-chip" style="--c:${esc(cat.color || "#64748B")}"${isGuess(t) ? ' title="Sugerida pela IA — toque na transação para confirmar ou corrigir"' : ""}>${esc(cat.icon)} ${esc(cat.name)}${isGuess(t) ? ' <span class="ai-badge">IA</span>' : ""}</span>
           <span class="tx-bank-name">${esc(info.name)}</span>
         </div>
       </div>
@@ -1826,7 +1844,7 @@ function openTxDetalhe(id) {
   document.getElementById("detalhe-body").innerHTML = `
     <div class="detalhe-value ${isPos ? "pos" : "neg"}">${isPos ? "+ " : "- "}${fmtBRL(Math.abs(t.value))}</div>
     <div style="font-weight:700;font-size:15px">${esc(t.desc)}</div>
-    <div class="detalhe-cat-badge">${cat.icon} ${esc(cat.name)}</div>
+    <div class="detalhe-cat-badge">${esc(cat.icon)} ${esc(cat.name)}</div>
     <div class="detalhe-info-row"><span>Categoria definida por</span><span>${sourceLabel(t)}</span></div>
     <div class="detalhe-info-row"><span>Banco</span><span>${esc(info.name)}</span></div>
     <div class="detalhe-info-row"><span>Data</span><span>${dateFmt}</span></div>
@@ -1909,7 +1927,7 @@ function openCategoriaModal(txId) {
           <button type="button" class="cat-mini-btn cat-mini-btn-danger" data-del-cat="${esc(c.id)}" title="Excluir categoria" aria-label="Excluir categoria">${ICONS.trash(11)}</button>
         </div>
       ` : ""}
-      <div class="cat-icon" style="background:${c.color}">${c.icon}</div>
+      <div class="cat-icon" style="background:${c.color}">${esc(c.icon)}</div>
       ${esc(c.name)}
     </div>
   `).join("") + `
@@ -2014,7 +2032,7 @@ function renderReviewStep() {
   const total = review.ids.length;
   const cats = allCategories().filter(c => c.id !== "nao_identificada" && (c.id !== "salario" || t.type === "entrada"));
   body.innerHTML = `
-    <div class="rev-progress"><span>${review.pos + 1} de ${total}</span><span>${cur.icon} ${esc(cur.name)}${isGuess(t) ? " · sugerida pela IA" : ""}</span></div>
+    <div class="rev-progress"><span>${review.pos + 1} de ${total}</span><span>${esc(cur.icon)} ${esc(cur.name)}${isGuess(t) ? " · sugerida pela IA" : ""}</span></div>
     <div class="rev-bar"><i style="width:${Math.round((review.pos / total) * 100)}%"></i></div>
     ${review.note ? `<div class="rev-note">${esc(review.note)}</div>` : ""}
     <div class="rev-tx">
@@ -2023,7 +2041,7 @@ function renderReviewStep() {
       <div class="rev-meta">${fmtDate(t.date) || ""} • ${esc(info.name)}</div>
     </div>
     <div class="cat-grid" id="rev-grid">
-      ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${esc(c.id)}"><div class="cat-icon" style="background:${c.color}">${c.icon}</div>${esc(c.name)}</div>`).join("")}
+      ${cats.map(c => `<div class="cat-grid-item ${c.id === t.category ? "selected" : ""}" data-rev-cat="${esc(c.id)}"><div class="cat-icon" style="background:${c.color}">${esc(c.icon)}</div>${esc(c.name)}</div>`).join("")}
       <div class="cat-grid-item cat-grid-add" id="rev-grid-add-btn">
         <div class="cat-icon cat-icon-add">+</div>
         Nova categoria
@@ -2121,7 +2139,7 @@ function renderCategorias() {
     const pct = total ? (val / total) * 100 : 0;
     return `<div class="cat-row" data-cat="${esc(cat)}">
       <div class="cat-row-left">
-        <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+        <div class="cat-icon" style="background:${info.color}">${esc(info.icon)}</div>
         <div class="cat-row-main">
           <div class="cat-name">${esc(info.name)}</div>
           <div class="cat-bar"><i style="width:${Math.max(2, pct).toFixed(1)}%;background:${info.color}"></i></div>
@@ -2218,7 +2236,7 @@ function populateCompareSelects() {
   if (!months.includes(cur)) months.unshift(cur);
   const c1 = document.getElementById("comp-mes1"), c2 = document.getElementById("comp-mes2");
   const p1 = c1.value, p2 = c2.value;
-  const opts = months.map(m => `<option value="${m}">${esc(monthOptionLabel(m))}</option>`).join("");
+  const opts = months.map(m => `<option value="${m}">${esc(monthShortLabel(m))}</option>`).join("");
   c1.innerHTML = opts; c2.innerHTML = opts;
   c1.value = months.includes(p1) ? p1 : (months[1] || months[0]);
   c2.value = months.includes(p2) ? p2 : months[0];
@@ -2266,7 +2284,7 @@ function renderCompareResult() {
     const ok = gasto ? x.d <= 0 : x.d >= 0;
     const sign = x.d > 0 ? "+" : x.d < 0 ? "−" : "";
     return `<div class="cmp-cat" data-cat="${esc(x.c)}">
-      <div class="cat-icon" style="background:${info.color}">${info.icon}</div>
+      <div class="cat-icon" style="background:${info.color}">${esc(info.icon)}</div>
       <div class="cmp-cat-main"><div class="cat-name">${esc(info.name)}</div><div class="cat-pct">${fmtBRL(x.a)} → ${fmtBRL(x.b)}</div></div>
       <div class="cmp-delta ${x.d === 0 ? "" : ok ? "good" : "bad"}">${sign}${fmtBRL(Math.abs(x.d))}</div>
     </div>`;
@@ -2385,13 +2403,13 @@ function initGoogleLogin() {
 function openConfiguracoes() {
   document.getElementById("cfg-nome").value = state.user?.name || "";
   document.getElementById("cfg-email").value = state.user?.email || "";
-  document.getElementById("cfg-moeda").value = state.preferences.currency || "BRL";
+  document.getElementById("cfg-moeda").value = "BRL";
   document.getElementById("cfg-modo-escuro").checked = document.documentElement.getAttribute("data-theme") === "dark";
   renderAccentPicker(); renderNavEditor(); loadBlockedNames();
   openModal("modal-configuracoes");
 }
 async function saveConfiguracoes() {
-  const currency = document.getElementById("cfg-moeda").value;
+  const currency = "BRL";
   const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   try {
     await api("/me/preferences", { method: "PUT", body: { theme, currency } });
